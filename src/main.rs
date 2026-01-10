@@ -34,6 +34,8 @@ use lazyslurm::ui::{App, events};
   q: quit
   ↑/↓ or j/k: navigate jobs
   r: refresh jobs
+  u: filter users
+  p: filter partitions
   c: cancel selected job
 
 Notes:
