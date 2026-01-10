@@ -11,6 +11,7 @@ use std::{
 pub async fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
     match app.state {
         AppState::Normal => event_normal_state(app, key).await,
+        AppState::Feedback => event_feedback_state(app, key).await,
         AppState::UserSearchPopup => event_user_search_popup(app, key).await,
         AppState::CancelJobPopup => event_cancel_popup(app, key).await,
         AppState::PartitionSearchPopup => event_partition_search_popup(app, key).await,
@@ -103,6 +104,13 @@ async fn event_partition_search_popup(
     Ok(None)
 }
 
+async fn event_feedback_state(
+    _app: &mut App,
+    _key: KeyEvent,
+) -> Result<Option<()>, Box<dyn Error>> {
+    Ok(None)
+}
+
 async fn event_cancel_popup(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
     match key.code {
         KeyCode::Char('y') => {
@@ -147,6 +155,14 @@ pub async fn run_event_loop(
 
         if last_tick.elapsed() >= tick_rate {
             last_tick = Instant::now();
+        }
+        if app.state == AppState::Feedback
+            && let Some(shown_at) = app.feedback_shown_at
+            && shown_at.elapsed() >= app.feedback_duration
+        {
+            app.feedback_message = None;
+            app.feedback_shown_at = None;
+            app.state = AppState::Normal;
         }
     }
 }

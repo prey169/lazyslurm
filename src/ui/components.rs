@@ -6,12 +6,12 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
 };
-use std::fs;
+use std::{fs, time::Instant};
 
 use crate::slurm::SlurmParser;
 use crate::ui::App;
 use crate::{
-    AppState,
+    AppState, FeedbackMessage,
     models::{Job, JobState},
 };
 
@@ -85,6 +85,7 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
         AppState::CancelJobPopup => {
             let popup_area = centered_rect(30, 7, frame.area());
 
+            frame.render_widget(Clear, popup_area);
             let selected_job_clone = app.selected_job.clone();
             let popup: Paragraph;
 
@@ -100,10 +101,41 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
                     )
                     .wrap(Wrap { trim: true })
                     .alignment(Alignment::Center);
+                frame.render_widget(popup, popup_area);
+            } else {
+                app.feedback_message = Some(FeedbackMessage {
+                    message: "Job already finished - Reverting back to main view!".to_string(),
+                    title: "Job Finished".to_string(),
+                });
+                app.state = AppState::Feedback;
+                app.feedback_shown_at = Some(Instant::now());
+            };
+        }
+        AppState::Feedback => {
+            let popup_area = centered_rect(50, 7, frame.area());
+            if let Some(feedback) = &app.feedback_message {
+                let (msg_text, title_text) = feedback.as_parts();
+
+                let style = Style::default().fg(Color::White);
+
+                let popup = Paragraph::new(msg_text.to_string())
+                    .style(style)
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title(title_text.to_string())
+                            .style(Style::default().fg(Color::Yellow)),
+                    )
+                    .alignment(Alignment::Center)
+                    .wrap(Wrap { trim: true });
 
                 frame.render_widget(popup, popup_area);
+            } else {
+                // This is to avoid a crash, basically just go to normal state
+                app.state = AppState::Normal;
             }
         }
+
         _ => {}
     }
 }
@@ -250,6 +282,7 @@ fn render_help_bar(app_state: AppState, frame: &mut Frame, area: Rect) {
         AppState::CancelJobPopup => "y: confirm | n: reject | esc: reject",
         AppState::PartitionSearchPopup => "esc: close | Enter: submit",
         AppState::UserSearchPopup => "esc: close | Enter: submit",
+        AppState::Feedback => "",
     };
     let help = Paragraph::new(help_text)
         .block(Block::default().borders(Borders::ALL))

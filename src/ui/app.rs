@@ -16,9 +16,29 @@ pub enum AppEvent {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AppState {
     Normal,
+    Feedback,
     PartitionSearchPopup,
     UserSearchPopup,
     CancelJobPopup,
+}
+
+#[derive(Debug)]
+pub struct FeedbackMessage {
+    pub message: String,
+    pub title: String,
+}
+
+impl FeedbackMessage {
+    pub fn as_parts(&self) -> (&str, &str) {
+        (&self.message, &self.title)
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+    pub fn title(&self) -> &str {
+        &self.title
+    }
 }
 
 #[derive(Debug)]
@@ -37,6 +57,9 @@ pub struct App {
     pub event_receiver: mpsc::UnboundedReceiver<AppEvent>,
     pub confirm_action: bool,
     pub input: String,
+    pub feedback_message: Option<FeedbackMessage>,
+    pub feedback_duration: Duration,
+    pub feedback_shown_at: Option<Instant>,
 }
 
 impl App {
@@ -58,6 +81,9 @@ impl App {
             event_receiver,
             confirm_action: false,
             input: "".to_string(),
+            feedback_message: None,
+            feedback_duration: Duration::from_secs(2),
+            feedback_shown_at: None,
         }
     }
 
