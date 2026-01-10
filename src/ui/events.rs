@@ -58,10 +58,10 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         (KeyCode::Char('r'), _) => {
             app.refresh_jobs().await?;
         }
-        (KeyCode::Up, _) => {
+        (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
             app.select_previous_job();
         }
-        (KeyCode::Down, _) => {
+        (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
             app.select_next_job();
         }
         (KeyCode::Char('u'), _) => {
