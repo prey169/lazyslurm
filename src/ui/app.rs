@@ -1,4 +1,5 @@
 use anyhow::Result;
+use ratatui::widgets::ListState;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
@@ -24,7 +25,7 @@ pub enum AppState {
 pub struct App {
     pub job_list: JobList,
     pub state: AppState,
-    pub selected_job_index: usize,
+    pub job_list_state: ListState,
     pub selected_job: Option<Job>,
     pub current_user: Option<String>,
     pub current_partition: Option<String>,
@@ -45,7 +46,7 @@ impl App {
         Self {
             job_list: JobList::new(),
             state: AppState::Normal,
-            selected_job_index: 0,
+            job_list_state: ListState::default(),
             selected_job: None,
             current_user: std::env::var("USER").ok(),
             current_partition: None,
@@ -80,7 +81,7 @@ impl App {
         match self.fetch_jobs().await {
             Ok(jobs) => {
                 self.job_list.update(jobs);
-                self.update_selected_job();
+                self.update_selected_job_from_state();
                 self.last_refresh = Instant::now();
             }
             Err(e) => {
@@ -118,26 +119,23 @@ impl App {
     }
 
     pub fn select_next_job(&mut self) {
-        if !self.job_list.jobs.is_empty() && self.selected_job_index < self.job_list.jobs.len() - 1
-        {
-            self.selected_job_index += 1;
-            self.update_selected_job();
-        }
+        self.job_list_state.select_next();
+        self.update_selected_job_from_state();
     }
 
     pub fn select_previous_job(&mut self) {
-        if self.selected_job_index > 0 {
-            self.selected_job_index -= 1;
-            self.update_selected_job();
-        }
+        self.job_list_state.select_previous();
+        self.update_selected_job_from_state();
     }
 
-    fn update_selected_job(&mut self) {
-        if !self.job_list.jobs.is_empty() && self.selected_job_index > self.job_list.jobs.len() - 1
-        {
-            self.selected_job_index = self.job_list.jobs.len() - 1;
-        }
-        self.selected_job = self.job_list.jobs.get(self.selected_job_index).cloned();
+    pub fn select_first(&mut self) {
+        self.job_list_state.select_first();
+        self.update_selected_job_from_state();
+    }
+
+    pub fn select_last(&mut self) {
+        self.job_list_state.select_last();
+        self.update_selected_job_from_state();
     }
 
     pub fn get_selected_job(&self) -> Option<&Job> {
@@ -154,6 +152,22 @@ impl App {
 
     pub fn completed_jobs(&self) -> Vec<&Job> {
         self.job_list.completed_jobs()
+    }
+
+    fn update_selected_job_from_state(&mut self) {
+        if self.job_list.jobs.is_empty() {
+            self.selected_job = None;
+            return;
+        }
+
+        match self.job_list_state.selected() {
+            Some(idx) => {
+                self.selected_job = self.job_list.jobs.get(idx).cloned();
+            }
+            None => {
+                self.job_list_state.select_first();
+            }
+        }
     }
 
     pub async fn handle_cancel_popup(&mut self) -> Result<()> {

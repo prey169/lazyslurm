@@ -33,7 +33,7 @@ fn render_text_popup(popup_text: String, app: &App, frame: &mut Frame) {
     frame.render_widget(popup, popup_area);
 }
 
-pub fn render_app(frame: &mut Frame, app: &App) {
+pub fn render_app(frame: &mut Frame, app: &mut App) {
     // Create main layout
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -85,21 +85,24 @@ pub fn render_app(frame: &mut Frame, app: &App) {
         AppState::CancelJobPopup => {
             let popup_area = centered_rect(30, 7, frame.area());
 
-            frame.render_widget(Clear, popup_area);
-            let selected_job_id = app.selected_job.clone().unwrap().job_id;
+            let selected_job_clone = app.selected_job.clone();
+            let popup: Paragraph;
 
-            let popup = Paragraph::new(format!("Cancel job id: {selected_job_id}? (y/n)",))
-                .style(Style::default().fg(Color::White))
-                .block(
-                    Block::default()
-                        .borders(Borders::ALL)
-                        .title("Confirm")
-                        .style(Style::default().fg(Color::Yellow)),
-                )
-                .wrap(Wrap { trim: true })
-                .alignment(Alignment::Center);
+            if let Some(job_clone) = selected_job_clone {
+                let selected_job_id = job_clone.job_id;
+                popup = Paragraph::new(format!("Cancel job id: {selected_job_id}? (y/n)",))
+                    .style(Style::default().fg(Color::White))
+                    .block(
+                        Block::default()
+                            .borders(Borders::ALL)
+                            .title("Confirm")
+                            .style(Style::default().fg(Color::Yellow)),
+                    )
+                    .wrap(Wrap { trim: true })
+                    .alignment(Alignment::Center);
 
-            frame.render_widget(popup, popup_area);
+                frame.render_widget(popup, popup_area);
+            }
         }
         _ => {}
     }
@@ -135,19 +138,12 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(status, area);
 }
 
-fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
+fn render_jobs_list(frame: &mut Frame, app: &mut App, area: Rect) {
     let jobs: Vec<ListItem> = app
         .job_list
         .jobs
         .iter()
-        .enumerate()
-        .map(|(i, job)| {
-            let style = if i == app.selected_job_index {
-                Style::default().bg(Color::Blue).fg(Color::White)
-            } else {
-                Style::default()
-            };
-
+        .map(|job| {
             let state_color = match job.state {
                 JobState::Running => Color::Green,
                 JobState::Pending => Color::Yellow,
@@ -167,16 +163,19 @@ fn render_jobs_list(frame: &mut Frame, app: &App, area: Rect) {
                 Span::styled(format!("{} ", job.state), Style::default().fg(state_color)),
                 Span::styled(time_used.to_string(), Style::default()),
             ]))
-            .style(style)
         })
         .collect();
 
     let title = format!("Jobs ({} total)", app.job_list.jobs.len());
+
     let jobs_list = List::new(jobs)
         .block(Block::default().title(title).borders(Borders::ALL))
-        .highlight_style(Style::default().add_modifier(Modifier::BOLD));
+        .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+        .highlight_symbol("➤ ")
+        .scroll_padding(2)
+        .repeat_highlight_symbol(false);
 
-    frame.render_widget(jobs_list, area);
+    frame.render_stateful_widget(jobs_list, area, &mut app.job_list_state);
 }
 
 fn render_job_details(frame: &mut Frame, app: &App, area: Rect) {
