@@ -129,6 +129,10 @@ impl App {
     }
 
     fn update_selected_job(&mut self) {
+        if !self.job_list.jobs.is_empty() && self.selected_job_index > self.job_list.jobs.len() - 1
+        {
+            self.selected_job_index = self.job_list.jobs.len() - 1;
+        }
         self.selected_job = self.job_list.jobs.get(self.selected_job_index).cloned();
     }
 
