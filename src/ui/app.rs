@@ -60,10 +60,14 @@ impl App {
         }
     }
 
-    pub fn with_cli(user: Option<String>, partition: Option<String>) -> Self {
+    pub fn with_cli(user: Option<String>, partition: Option<String>, all_users: bool) -> Self {
         let mut app = Self::new();
         if user.is_some() {
             app.current_user = user;
+        } else if user.is_none() && all_users {
+            app.current_user = None;
+        } else {
+            app.current_user = std::env::var("USER").ok();
         }
         app.current_partition = partition;
         app

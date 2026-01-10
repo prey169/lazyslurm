@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{ArgAction, Parser};
 use crossterm::{
     event::{DisableMouseCapture, EnableMouseCapture},
     execute,
@@ -56,6 +56,14 @@ struct Cli {
         help = "Filter to a specific partition (e.g., gpu)"
     )]
     partition: Option<String>,
+
+    #[arg(
+        short = 'a',
+        long = "all",
+        action = ArgAction::SetTrue,
+        help = "Sets initial user value to blank so all visible user jobs are shown"
+    )]
+    all_users: bool,
 }
 
 #[tokio::main]
@@ -80,7 +88,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     // Create app and run
-    let mut app = App::with_cli(cli.user, cli.partition);
+    let mut app = App::with_cli(cli.user, cli.partition, cli.all_users);
     let result = run_app(&mut terminal, &mut app).await;
 
     // Restore terminal
