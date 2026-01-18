@@ -246,7 +246,8 @@ fn render_job_details(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_job_logs(frame: &mut Frame, app: &App, area: Rect) {
     let content = if let Some(job) = app.get_selected_job() {
-        read_job_logs(job)
+        let available_lines = area.height.saturating_sub(4) as usize;
+        read_job_logs(job, available_lines)
     } else {
         "Select a job to view logs".to_string()
     };
@@ -357,7 +358,7 @@ fn format_job_details(job: &Job) -> String {
     details.join("\n")
 }
 
-fn read_job_logs(job: &Job) -> String {
+fn read_job_logs(job: &Job, max_lines: usize) -> String {
     let log_paths = SlurmParser::get_job_log_paths(job);
 
     // Try each potential log path
@@ -367,14 +368,21 @@ fn read_job_logs(job: &Job) -> String {
                 return format!("Log file exists but is empty: {}", path);
             }
 
-            // Show last 20 lines (tail-like behavior)
+            // Shows last based on max_lines available (tail-like behavior)
             let lines: Vec<&str> = content.lines().collect();
-            let start = lines.len().saturating_sub(20);
+
+            if lines.len() <= max_lines {
+                return format!("Log file: {}\n{}\n{}", path, "-".repeat(50), content);
+            }
+
+            let start = lines.len().saturating_sub(max_lines);
             let tail_lines = &lines[start..];
 
             return format!(
-                "Log file: {}\n{}\n{}",
+                "Log file: {}  (showing last {} of {} lines)\n{}\n{}",
                 path,
+                max_lines,
+                lines.len(),
                 "-".repeat(50),
                 tail_lines.join("\n")
             );
