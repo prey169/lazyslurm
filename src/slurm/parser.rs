@@ -169,8 +169,13 @@ impl SlurmParser {
         }
 
         // Additional fallback: Check /tmp for logs (common in dev environments)
-        paths.push(format!("/tmp/slurm-{}.out", job.job_id));
-        paths.push(format!("/tmp/slurm-{}.err", job.job_id));
+        if !paths.contains(&format!("/tmp/slurm-{}.out", job.job_id)) {
+            paths.push(format!("/tmp/slurm-{}.out", job.job_id));
+        }
+
+        if !paths.contains(&format!("/tmp/slurm-{}.err", job.job_id)) {
+            paths.push(format!("/tmp/slurm-{}.err", job.job_id));
+        }
 
         paths
     }
