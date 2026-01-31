@@ -13,13 +13,14 @@ pub enum AppEvent {
     Quit,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Eq, Debug, PartialEq)]
 pub enum AppState {
     Normal,
     Feedback,
     PartitionSearchPopup,
     UserSearchPopup,
     CancelJobPopup,
+    NodelistSelectPopup { original_nodelist: Vec<String> },
 }
 
 #[derive(Debug)]
@@ -49,6 +50,9 @@ pub struct App {
     pub selected_job: Option<Job>,
     pub current_user: Option<String>,
     pub current_partition: Option<String>,
+    pub nodelist: Vec<String>,
+    pub current_nodelist: Vec<String>,
+    pub node_list_state: ListState,
     pub last_refresh: Instant,
     pub refresh_interval: Duration,
     pub is_loading: bool,
@@ -65,6 +69,8 @@ pub struct App {
 impl App {
     pub fn new() -> Self {
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
+        let mut node_list_state = ListState::default();
+        node_list_state.select_first();
 
         Self {
             job_list: JobList::new(),
@@ -73,6 +79,9 @@ impl App {
             selected_job: None,
             current_user: std::env::var("USER").ok(),
             current_partition: None,
+            nodelist: Vec::new(),
+            current_nodelist: Vec::new(),
+            node_list_state,
             last_refresh: Instant::now(),
             refresh_interval: Duration::from_secs(2), // Refresh every 2 seconds
             is_loading: false,
@@ -87,7 +96,12 @@ impl App {
         }
     }
 
-    pub fn with_cli(user: Option<String>, partition: Option<String>, all_users: bool) -> Self {
+    pub fn with_cli(
+        user: Option<String>,
+        partition: Option<String>,
+        nodelist: Vec<String>,
+        all_users: bool,
+    ) -> Self {
         let mut app = Self::new();
         if user.is_some() {
             app.current_user = user;
@@ -97,7 +111,16 @@ impl App {
             app.current_user = std::env::var("USER").ok();
         }
         app.current_partition = partition;
+        app.current_nodelist = nodelist;
         app
+    }
+
+    pub async fn refresh_nodelist(&mut self) -> Result<()> {
+        match SlurmCommands::sinfo_show_nodelist().await {
+            Ok(nodes) => self.nodelist = nodes,
+            Err(e) => self.error_message = Some(format!("Failed to fetch nodes: {}", e)),
+        }
+        Ok(())
     }
 
     pub async fn refresh_jobs(&mut self) -> Result<()> {
@@ -124,6 +147,7 @@ impl App {
         let squeue_output = SlurmCommands::squeue(
             self.current_user.as_deref(),
             self.current_partition.as_deref(),
+            &self.current_nodelist,
         )
         .await?;
         let mut jobs = SlurmParser::parse_squeue_output(&squeue_output)?;

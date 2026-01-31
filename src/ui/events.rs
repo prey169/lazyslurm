@@ -15,6 +15,7 @@ pub async fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<Option<()>
         AppState::UserSearchPopup => event_user_search_popup(app, key).await,
         AppState::CancelJobPopup => event_cancel_popup(app, key).await,
         AppState::PartitionSearchPopup => event_partition_search_popup(app, key).await,
+        AppState::NodelistSelectPopup { .. } => event_nodelist_select_popup(app, key).await,
     }
 }
 
@@ -71,6 +72,14 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         (KeyCode::Char('p'), _) => {
             app.state = AppState::PartitionSearchPopup;
         }
+        (KeyCode::Char('n'), _) => {
+            app.state = AppState::NodelistSelectPopup {
+                original_nodelist: app.current_nodelist.clone(),
+            };
+            app.current_nodelist
+                .retain(|node| app.nodelist.contains(node));
+            app.refresh_nodelist().await?;
+        }
         (KeyCode::Char('c'), _) if app.selected_job.is_some() => {
             app.confirm_action = false;
             app.state = AppState::CancelJobPopup;
@@ -100,6 +109,65 @@ async fn event_partition_search_popup(
     if let Some(partition) = partition_search {
         app.current_partition = partition;
         reset_popup_state_to_normal(app).await?;
+    }
+    Ok(None)
+}
+async fn event_nodelist_select_popup(
+    app: &mut App,
+    key: KeyEvent,
+) -> Result<Option<()>, Box<dyn Error>> {
+    match key.code {
+        KeyCode::Down => {
+            app.node_list_state.select_next();
+        }
+
+        KeyCode::Up => {
+            app.node_list_state.select_previous();
+        }
+
+        KeyCode::Home => {
+            app.node_list_state.select_first();
+        }
+
+        KeyCode::End => {
+            app.node_list_state.select_last();
+        }
+
+        KeyCode::Char(' ') => {
+            if let Some(index) = app.node_list_state.selected()
+                && let Some(node) = app.nodelist.get(index)
+            {
+                let node = node.clone();
+
+                if app.current_nodelist.contains(&node) {
+                    app.current_nodelist.retain(|n| n != &node);
+                } else {
+                    app.current_nodelist.push(node);
+                }
+            }
+        }
+        // Ctrl+A → select all
+        KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.current_nodelist = app.nodelist.clone();
+        }
+
+        // Deselect all
+        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+            app.current_nodelist.clear();
+        }
+
+        KeyCode::Enter => {
+            app.state = AppState::Normal;
+        }
+
+        KeyCode::Esc => {
+            if let AppState::NodelistSelectPopup { original_nodelist } = &app.state {
+                app.current_nodelist = original_nodelist.clone();
+            }
+            app.state = AppState::Normal;
+        }
+
+        _ => {}
     }
     Ok(None)
 }

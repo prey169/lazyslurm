@@ -4,7 +4,7 @@ use ratatui::{
     prelude::Alignment,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap},
+    widgets::{Block, Borders, Clear, HighlightSpacing, List, ListItem, Paragraph, Wrap},
 };
 use std::{fs, time::Instant};
 
@@ -75,12 +75,55 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
     render_quick_info(frame, app, right_chunks[2]);
 
     // Render help bar
-    render_help_bar(app.state, frame, chunks[2]);
+    render_help_bar(&app.state, frame, chunks[2]);
 
     match app.state {
         AppState::UserSearchPopup => render_text_popup("Search User:".to_string(), app, frame),
         AppState::PartitionSearchPopup => {
             render_text_popup("Search Partition:".to_string(), app, frame)
+        }
+        AppState::NodelistSelectPopup { .. } => {
+            let popup_area = centered_rect(70, 80, frame.area());
+
+            frame.render_widget(Clear, popup_area);
+
+            let block = Block::bordered()
+                .title("Select items (Space to toggle, Enter to confirm, Esc to close)")
+                .border_style(Style::new().fg(Color::Cyan));
+
+            let inner_area = block.inner(popup_area);
+            let nodes: Vec<ListItem> = app
+                .nodelist
+                .iter()
+                .map(|node| {
+                    let checked = app.current_nodelist.contains(node);
+
+                    let prefix = if checked { " [x] " } else { " [ ] " };
+                    let style = if checked {
+                        Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default()
+                    };
+
+                    let mut item = ListItem::new(format!("{prefix}{node}")).style(style);
+
+                    if let Some(idx) = app.node_list_state.selected()
+                        && idx < app.nodelist.len()
+                        && app.nodelist[idx] == *node
+                    {
+                        item = item.style(Style::new().bg(Color::DarkGray));
+                    }
+
+                    item
+                })
+                .collect();
+            let list = List::new(nodes)
+                .block(Block::bordered().title("Select nodes"))
+                .highlight_style(Style::new().bg(Color::Blue).add_modifier(Modifier::BOLD))
+                .highlight_symbol(">> ")
+                .highlight_spacing(HighlightSpacing::Always);
+
+            frame.render_stateful_widget(list, inner_area, &mut app.node_list_state);
         }
         AppState::CancelJobPopup => {
             let popup_area = centered_rect(30, 7, frame.area());
@@ -275,14 +318,17 @@ fn render_quick_info(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(quick_info, area);
 }
 
-fn render_help_bar(app_state: AppState, frame: &mut Frame, area: Rect) {
+fn render_help_bar(app_state: &AppState, frame: &mut Frame, area: Rect) {
     let help_text = match app_state {
         AppState::Normal => {
-            "q: quit | ↑↓: navigate | r: refresh | c: cancel job | p: search partition | u: search user"
+            "q: quit | ↑↓: navigate | r: refresh | c: cancel job | p: search partition | u: search user | n: filter nodes"
         }
         AppState::CancelJobPopup => "y: confirm | n: reject | esc: reject",
         AppState::PartitionSearchPopup => "esc: close | Enter: submit",
         AppState::UserSearchPopup => "esc: close | Enter: submit",
+        AppState::NodelistSelectPopup { .. } => {
+            "esc: close | Enter: submit | Search: <chars> | Ctrl-a: Select all | Ctrl-d: Deselect all"
+        }
         AppState::Feedback => "",
     };
     let help = Paragraph::new(help_text)

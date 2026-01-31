@@ -36,6 +36,7 @@ use lazyslurm::ui::{App, events};
   r: refresh jobs
   u: filter users
   p: filter partitions
+  n: filter nodes
   c: cancel selected job
 
 Notes:
@@ -56,6 +57,14 @@ struct Cli {
         help = "Filter to a specific partition (e.g., gpu)"
     )]
     partition: Option<String>,
+
+    #[arg(
+        short = 'n',
+        long = "nodelist",
+        help = "Filter jobs by specific nodes (comma delimited)",
+        value_delimiter = ','
+    )]
+    nodelist: Vec<String>,
 
     #[arg(
         short = 'a',
@@ -88,7 +97,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     // Create app and run
-    let mut app = App::with_cli(cli.user, cli.partition, cli.all_users);
+    let mut app = App::with_cli(cli.user, cli.partition, cli.nodelist, cli.all_users);
     let result = run_app(&mut terminal, &mut app).await;
 
     // Restore terminal

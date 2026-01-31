@@ -5,7 +5,11 @@ use tokio::process::Command as TokioCommand;
 pub struct SlurmCommands;
 
 impl SlurmCommands {
-    pub async fn squeue(user: Option<&str>, partition: Option<&str>) -> Result<String> {
+    pub async fn squeue(
+        user: Option<&str>,
+        partition: Option<&str>,
+        nodelist: &[String],
+    ) -> Result<String> {
         let mut cmd = TokioCommand::new("squeue");
 
         if let Some(user) = user {
@@ -14,6 +18,11 @@ impl SlurmCommands {
 
         if let Some(partition) = partition {
             cmd.arg("-p").arg(partition);
+        }
+
+        if !nodelist.is_empty() {
+            let nodes = nodelist.join(",");
+            cmd.arg("--nodes").arg(nodes);
         }
 
         cmd.arg("--format=%i,%j,%u,%t,%M,%N,%P");
@@ -58,6 +67,30 @@ impl SlurmCommands {
         }
 
         Ok(())
+    }
+
+    pub async fn sinfo_show_nodelist() -> Result<Vec<String>> {
+        let output = TokioCommand::new("sinfo")
+            .args(["-Nho", "%N"])
+            .output()
+            .await
+            .context("Failed to execute sinfo")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("sinfo failed: {}", stderr.trim());
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        let nodes: Vec<String> = stdout
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.trim().is_empty())
+            .map(str::to_string)
+            .collect();
+
+        Ok(nodes)
     }
 
     pub fn check_slurm_available() -> bool {
