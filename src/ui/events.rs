@@ -73,12 +73,19 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
             app.state = AppState::PartitionSearchPopup;
         }
         (KeyCode::Char('n'), _) => {
-            app.state = AppState::NodelistSelectPopup {
-                original_nodelist: app.current_nodelist.clone(),
-            };
             app.current_nodelist
                 .retain(|node| app.nodelist.contains(node));
             app.refresh_nodelist().await?;
+
+            let mut visible_indices: Vec<usize> = Vec::new();
+            let search = String::new();
+            update_visible_nodes(&app.nodelist, &search, &mut visible_indices);
+
+            app.state = AppState::NodelistSelectPopup {
+                original_nodelist: app.current_nodelist.clone(),
+                search,
+                visible_indices,
+            };
         }
         (KeyCode::Char('c'), _) if app.selected_job.is_some() => {
             app.confirm_action = false;
@@ -101,6 +108,29 @@ async fn event_user_search_popup(
     Ok(None)
 }
 
+fn update_visible_nodes(nodelist: &[String], search: &str, visible_indices: &mut Vec<usize>) {
+    let query = search.to_lowercase();
+
+    let filtered: Vec<(String, usize)> = nodelist
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, node)| {
+            if search.is_empty() {
+                return Some((node.clone(), idx));
+            }
+
+            let lower_node = node.to_lowercase();
+            if sublime_fuzzy::best_match(&query, &lower_node).is_some() {
+                Some((node.clone(), idx))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    *visible_indices = filtered.into_iter().map(|(_, idx)| idx).collect();
+}
+
 async fn event_partition_search_popup(
     app: &mut App,
     key: KeyEvent,
@@ -116,58 +146,104 @@ async fn event_nodelist_select_popup(
     app: &mut App,
     key: KeyEvent,
 ) -> Result<Option<()>, Box<dyn Error>> {
-    match key.code {
-        KeyCode::Down => {
-            app.node_list_state.select_next();
-        }
+    if let AppState::NodelistSelectPopup {
+        original_nodelist,
+        search,
+        visible_indices,
+        ..
+    } = &mut app.state
+    {
+        match key.code {
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                return Ok(Some(()));
+            }
 
-        KeyCode::Up => {
-            app.node_list_state.select_previous();
-        }
+            KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let visible_nodes: Vec<String> = visible_indices
+                    .iter()
+                    .map(|&idx| app.nodelist[idx].clone())
+                    .collect();
 
-        KeyCode::Home => {
-            app.node_list_state.select_first();
-        }
+                app.current_nodelist = visible_nodes;
+            }
 
-        KeyCode::End => {
-            app.node_list_state.select_last();
-        }
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let visible_set: Vec<String> = visible_indices
+                    .iter()
+                    .map(|&idx| app.nodelist[idx].clone())
+                    .collect();
 
-        KeyCode::Char(' ') => {
-            if let Some(index) = app.node_list_state.selected()
-                && let Some(node) = app.nodelist.get(index)
-            {
-                let node = node.clone();
+                app.current_nodelist
+                    .retain(|node| !visible_set.contains(node));
+            }
 
-                if app.current_nodelist.contains(&node) {
-                    app.current_nodelist.retain(|n| n != &node);
-                } else {
-                    app.current_nodelist.push(node);
+            KeyCode::Char('i') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                let visible_set: Vec<String> = visible_indices
+                    .iter()
+                    .map(|&idx| app.nodelist[idx].clone())
+                    .collect();
+
+                for node in visible_set {
+                    if app.current_nodelist.contains(&node) {
+                        app.current_nodelist.retain(|n| n != &node);
+                    } else {
+                        app.current_nodelist.push(node);
+                    }
                 }
             }
-        }
-        // Ctrl+A → select all
-        KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.current_nodelist = app.nodelist.clone();
-        }
 
-        // Deselect all
-        KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            app.current_nodelist.clear();
-        }
-
-        KeyCode::Enter => {
-            app.state = AppState::Normal;
-        }
-
-        KeyCode::Esc => {
-            if let AppState::NodelistSelectPopup { original_nodelist } = &app.state {
-                app.current_nodelist = original_nodelist.clone();
+            KeyCode::Down => {
+                app.node_list_state.select_next();
             }
-            app.state = AppState::Normal;
-        }
 
-        _ => {}
+            KeyCode::Up => {
+                app.node_list_state.select_previous();
+            }
+
+            KeyCode::Home => {
+                app.node_list_state.select_first();
+            }
+
+            KeyCode::End => {
+                app.node_list_state.select_last();
+            }
+
+            KeyCode::Char(c) if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' => {
+                search.push(c);
+                update_visible_nodes(&app.nodelist, search, visible_indices);
+                app.node_list_state.select_first();
+            }
+
+            KeyCode::Backspace => {
+                search.pop();
+                update_visible_nodes(&app.nodelist, search, visible_indices);
+                app.node_list_state.select_first();
+            }
+
+            KeyCode::Char(' ') => {
+                if let Some(index) = app.node_list_state.selected()
+                    && let Some(node) = app.nodelist.get(index)
+                {
+                    let node = node.clone();
+
+                    if app.current_nodelist.contains(&node) {
+                        app.current_nodelist.retain(|n| n != &node);
+                    } else {
+                        app.current_nodelist.push(node);
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                app.state = AppState::Normal;
+            }
+
+            KeyCode::Esc => {
+                app.current_nodelist = original_nodelist.clone();
+                app.state = AppState::Normal;
+            }
+
+            _ => {}
+        }
     }
     Ok(None)
 }

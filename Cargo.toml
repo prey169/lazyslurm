@@ -40,6 +40,7 @@ anyhow = "1.0"
 
 # Regex for parsing
 regex = "1.10"
+sublime_fuzzy = "0.7.0"
 
 [profile.dev]
 opt-level = 0

@@ -4,7 +4,10 @@ use ratatui::{
     prelude::Alignment,
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Clear, HighlightSpacing, List, ListItem, Paragraph, Wrap},
+    widgets::{
+        Block, Borders, Clear, HighlightSpacing, List, ListItem, Paragraph, Wrap,
+        block::{Position, Title},
+    },
 };
 use std::{fs, time::Instant};
 
@@ -77,28 +80,38 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
     // Render help bar
     render_help_bar(&app.state, frame, chunks[2]);
 
-    match app.state {
+    match &app.state {
         AppState::UserSearchPopup => render_text_popup("Search User:".to_string(), app, frame),
         AppState::PartitionSearchPopup => {
             render_text_popup("Search Partition:".to_string(), app, frame)
         }
-        AppState::NodelistSelectPopup { .. } => {
+        AppState::NodelistSelectPopup {
+            visible_indices,
+            search,
+            ..
+        } => {
             let popup_area = centered_rect(70, 80, frame.area());
 
             frame.render_widget(Clear, popup_area);
 
             let block = Block::bordered()
-                .title("Select items (Space to toggle, Enter to confirm, Esc to close)")
+                .title("Select nodes".to_string())
+                .title(
+                    Title::from(format!(" Fuzzy search: [{}] ", search)).position(Position::Bottom),
+                )
                 .border_style(Style::new().fg(Color::Cyan));
 
             let inner_area = block.inner(popup_area);
-            let nodes: Vec<ListItem> = app
-                .nodelist
+
+            let nodes: Vec<ListItem> = visible_indices
                 .iter()
-                .map(|node| {
+                .copied()
+                .map(|idx| {
+                    let node = &app.nodelist[idx];
                     let checked = app.current_nodelist.contains(node);
 
-                    let prefix = if checked { " [x] " } else { " [ ] " };
+                    let prefix = if checked { " [] " } else { " [ ] " };
+
                     let style = if checked {
                         Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)
                     } else {
@@ -107,9 +120,9 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
 
                     let mut item = ListItem::new(format!("{prefix}{node}")).style(style);
 
-                    if let Some(idx) = app.node_list_state.selected()
-                        && idx < app.nodelist.len()
-                        && app.nodelist[idx] == *node
+                    if let Some(selected_idx) = app.node_list_state.selected()
+                        && selected_idx < visible_indices.len()
+                        && visible_indices[selected_idx] == idx
                     {
                         item = item.style(Style::new().bg(Color::DarkGray));
                     }
@@ -117,10 +130,11 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
                     item
                 })
                 .collect();
+
             let list = List::new(nodes)
-                .block(Block::bordered().title("Select nodes"))
+                .block(block)
                 .highlight_style(Style::new().bg(Color::Blue).add_modifier(Modifier::BOLD))
-                .highlight_symbol(">> ")
+                .highlight_symbol("➤ ")
                 .highlight_spacing(HighlightSpacing::Always);
 
             frame.render_stateful_widget(list, inner_area, &mut app.node_list_state);
@@ -327,7 +341,7 @@ fn render_help_bar(app_state: &AppState, frame: &mut Frame, area: Rect) {
         AppState::PartitionSearchPopup => "esc: close | Enter: submit",
         AppState::UserSearchPopup => "esc: close | Enter: submit",
         AppState::NodelistSelectPopup { .. } => {
-            "esc: close | Enter: submit | Search: <chars> | Ctrl-a: Select all | Ctrl-d: Deselect all"
+            "esc: close | Enter: submit | Search: <chars> | Ctrl-a: Select visible | Ctrl-d: Deselect visible | Ctrl-i Invert visible"
         }
         AppState::Feedback => "",
     };

@@ -20,7 +20,11 @@ pub enum AppState {
     PartitionSearchPopup,
     UserSearchPopup,
     CancelJobPopup,
-    NodelistSelectPopup { original_nodelist: Vec<String> },
+    NodelistSelectPopup {
+        original_nodelist: Vec<String>,
+        search: String,
+        visible_indices: Vec<usize>,
+    },
 }
 
 #[derive(Debug)]
