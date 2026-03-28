@@ -1,11 +1,15 @@
 use anyhow::Result;
 use ratatui::widgets::{ListState, TableState};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
+use tokio::task::JoinSet;
 
 use crate::models::{Job, JobList};
 use crate::slurm::{SlurmCommands, SlurmParser};
 use crate::utils::SortField;
+
+type JobDetailsCache = HashMap<String, (std::collections::HashMap<String, String>, Instant)>;
 
 #[derive(Debug, Clone)]
 pub enum AppEvent {
@@ -108,6 +112,7 @@ pub struct App {
     pub feedback_message: Option<FeedbackMessage>,
     pub feedback_duration: Duration,
     pub feedback_shown_at: Option<Instant>,
+    pub job_details_cache: JobDetailsCache,
 }
 
 impl App {
@@ -153,6 +158,7 @@ impl App {
             feedback_message: None,
             feedback_duration: Duration::from_secs(2),
             feedback_shown_at: None,
+            job_details_cache: HashMap::new(),
         }
     }
 
@@ -214,14 +220,13 @@ impl App {
         let mut content = String::new();
 
         for path in &log_paths {
-            if path.ends_with(&format!(".{target_suffix}"))
-                || (target_suffix == "out" && !path.ends_with(".err"))
+            if (path.ends_with(&format!(".{target_suffix}"))
+                || (target_suffix == "out" && !path.ends_with(".err")))
+                && let Ok(read_content) = std::fs::read_to_string(path)
             {
-                if let Ok(read_content) = std::fs::read_to_string(path) {
-                    found_path = Some(path.clone());
-                    content = read_content;
-                    break;
-                }
+                found_path = Some(path.clone());
+                content = read_content;
+                break;
             }
         }
 
@@ -397,8 +402,7 @@ impl App {
         Ok(())
     }
 
-    async fn fetch_jobs(&self) -> Result<Vec<Job>> {
-        // Get basic job list from squeue
+    async fn fetch_jobs(&mut self) -> Result<Vec<Job>> {
         let squeue_output = SlurmCommands::squeue(
             self.current_user.as_deref(),
             self.current_partition.as_deref(),
@@ -407,12 +411,47 @@ impl App {
         .await?;
         let mut jobs = SlurmParser::parse_squeue_output(&squeue_output)?;
 
-        // For each job, get detailed info from scontrol (but only for first few to avoid overwhelming)
-        for job in jobs.iter_mut().take(10) {
-            if let Ok(scontrol_output) = SlurmCommands::scontrol_show_job(&job.job_id).await
-                && let Ok(fields) = SlurmParser::parse_scontrol_output(&scontrol_output)
-            {
-                SlurmParser::enhance_job_with_scontrol_data(job, fields);
+        let cache_duration = self
+            .config
+            .as_ref()
+            .map(|c| c.cache_duration_secs)
+            .unwrap_or(30);
+        let cache_ttl = Duration::from_secs(cache_duration);
+        let now = Instant::now();
+
+        self.job_details_cache.retain(|_, (_, timestamp)| now.duration_since(*timestamp) < cache_ttl);
+
+        let jobs_to_fetch: Vec<_> = jobs
+            .iter()
+            .filter(|job| !self.job_details_cache.contains_key(&job.job_id))
+            .take(10)
+            .map(|job| job.job_id.clone())
+            .collect();
+
+        if !jobs_to_fetch.is_empty() {
+            let mut join_set = JoinSet::new();
+
+            for job_id in jobs_to_fetch {
+                let job_id_clone = job_id.clone();
+                join_set.spawn(async move {
+                    let output = SlurmCommands::scontrol_show_job(&job_id_clone).await;
+                    (job_id_clone, output)
+                });
+            }
+
+            while let Some(result) = join_set.join_next().await {
+                #[allow(clippy::collapsible_if)]
+                if let Ok((job_id, Ok(scontrol_output))) = result {
+                    if let Ok(fields) = SlurmParser::parse_scontrol_output(&scontrol_output) {
+                        self.job_details_cache.insert(job_id.clone(), (fields, now));
+                    }
+                }
+            }
+        }
+
+        for job in jobs.iter_mut() {
+            if let Some((fields, _)) = self.job_details_cache.get(&job.job_id) {
+                SlurmParser::enhance_job_with_scontrol_data(job, fields.clone());
             }
         }
 

@@ -10,10 +10,8 @@ use std::{
 };
 
 pub async fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
-    if let KeyCode::Char('c') = key.code {
-        if key.modifiers.contains(KeyModifiers::CONTROL) {
-            return Ok(Some(()));
-        }
+    if let KeyCode::Char('c') = key.code && key.modifiers.contains(KeyModifiers::CONTROL) {
+        return Ok(Some(()));
     }
 
     match app.state {
@@ -155,7 +153,7 @@ async fn event_user_search_popup(
     Ok(None)
 }
 
-fn fuzzy_filter(items: &[String], search: &str) -> Vec<usize> {
+pub fn fuzzy_filter(items: &[String], search: &str) -> Vec<usize> {
     let query = search.to_lowercase();
 
     if search.is_empty() {
@@ -640,6 +638,7 @@ async fn event_sort_select_popup(
                 app.sort_list_state.select_last();
             }
             KeyCode::Enter => {
+                #[allow(clippy::collapsible_if)]
                 if let Some(selected_idx) = app.sort_list_state.selected() {
                     if let Some(&actual_idx) = visible_indices.get(selected_idx) {
                         if let Some(sort_field) = sort_options.get(actual_idx) {

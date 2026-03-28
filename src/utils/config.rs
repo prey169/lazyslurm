@@ -59,26 +59,26 @@ impl SortField {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub sort_field: SortField,
+    pub cache_duration_secs: u64,
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Config {
+        Self {
             sort_field: SortField::default(),
+            cache_duration_secs: 30,
         }
     }
 }
 
 impl Config {
     pub fn load() -> Config {
-        if let Some(path) = get_config_path() {
-            if path.exists() {
-                if let Ok(content) = fs::read_to_string(&path) {
-                    if let Ok(config) = toml::from_str(&content) {
-                        return config;
-                    }
-                }
-            }
+        if let Some(path) = get_config_path()
+            && path.exists()
+            && let Ok(content) = fs::read_to_string(&path)
+            && let Ok(config) = toml::from_str::<Config>(&content)
+        {
+            return config;
         }
         Config::default()
     }

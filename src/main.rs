@@ -128,10 +128,8 @@ async fn run_app(
 
     events::run_event_loop(app, terminal).await?;
 
-    if let Some(ref config) = app.config {
-        if let Err(e) = config.save() {
-            eprintln!("Warning: Failed to save config: {}", e);
-        }
+    if let Some(ref config) = app.config && let Err(e) = config.save() {
+        eprintln!("Warning: Failed to save config: {}", e);
     }
 
     Ok(())

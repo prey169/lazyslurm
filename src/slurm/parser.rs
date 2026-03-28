@@ -123,7 +123,7 @@ impl SlurmParser {
         }
     }
 
-    fn parse_slurm_time(time_str: &str) -> Option<DateTime<Utc>> {
+    pub fn parse_slurm_time(time_str: &str) -> Option<DateTime<Utc>> {
         // SLURM time formats: "2024-01-15T10:19:13" or "2024-01-15T10:19:13.123"
         // Sometimes also "Unknown" or "None" for jobs that haven't started
         if time_str == "Unknown" || time_str == "None" || time_str.is_empty() {
