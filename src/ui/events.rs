@@ -1,4 +1,4 @@
-use crate::app::{App, AppState};
+use crate::app::{App, AppState, LogType};
 use crate::render_app;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{Terminal, backend::CrosstermBackend};
@@ -9,6 +9,12 @@ use std::{
 };
 
 pub async fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
+    if let KeyCode::Char('c') = key.code {
+        if key.modifiers.contains(KeyModifiers::CONTROL) {
+            return Ok(Some(()));
+        }
+    }
+
     match app.state {
         AppState::Normal => event_normal_state(app, key).await,
         AppState::Feedback => event_feedback_state(app, key).await,
@@ -18,6 +24,7 @@ pub async fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<Option<()>
         AppState::NodelistSelectPopup { .. } => event_nodelist_select_popup(app, key).await,
         AppState::PartitionSelectPopup { .. } => event_partition_select_popup(app, key).await,
         AppState::UserSelectPopup { .. } => event_user_select_popup(app, key).await,
+        AppState::JobLogPopup(_) => event_job_log_popup(app, key).await,
     }
 }
 
@@ -54,9 +61,7 @@ pub async fn reset_popup_state_to_normal(app: &mut App) -> Result<(), Box<dyn Er
 
 async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, Box<dyn Error>> {
     match (key.code, key.modifiers) {
-        (KeyCode::Char('q'), _)
-        | (KeyCode::Char('Q'), _)
-        | (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+        (KeyCode::Char('q'), _) | (KeyCode::Char('Q'), _) => {
             return Ok(Some(()));
         }
         (KeyCode::Char('r'), _) => {
@@ -104,6 +109,14 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         (KeyCode::Char('c'), _) if app.selected_job.is_some() => {
             app.confirm_action = false;
             app.state = AppState::CancelJobPopup;
+        }
+        (KeyCode::Char('o'), _) if app.selected_job.is_some() => {
+            let log_state = app.load_job_log(app.selected_job.as_ref().unwrap(), LogType::Output);
+            app.state = AppState::JobLogPopup(log_state);
+        }
+        (KeyCode::Char('e'), _) if app.selected_job.is_some() => {
+            let log_state = app.load_job_log(app.selected_job.as_ref().unwrap(), LogType::Error);
+            app.state = AppState::JobLogPopup(log_state);
         }
         _ => {}
     }
@@ -409,6 +422,126 @@ async fn event_user_select_popup(
                 app.state = AppState::Normal;
             }
             _ => {}
+        }
+    }
+    Ok(None)
+}
+
+async fn event_job_log_popup(
+    app: &mut App,
+    key: KeyEvent,
+) -> Result<Option<()>, Box<dyn Error>> {
+    if let AppState::JobLogPopup(ref mut log_state) = app.state {
+        if log_state.is_searching {
+            match key.code {
+                KeyCode::Enter => {
+                    let query = log_state.search_query.to_lowercase();
+                    
+                    if query.is_empty() {
+                        log_state.is_searching = false;
+                    } else {
+                        let all_matches: Vec<usize> = log_state
+                            .lines
+                            .iter()
+                            .enumerate()
+                            .filter(|(_, line)| line.to_lowercase().contains(&query))
+                            .map(|(idx, _)| idx)
+                            .collect();
+                        
+                        let is_repeat_search = log_state.previous_query == log_state.search_query 
+                            && !log_state.previous_query.is_empty();
+                        
+                        if is_repeat_search {
+                            log_state.current_match_index = (log_state.current_match_index + 1)
+                                % all_matches.len();
+                        } else {
+                            log_state.previous_query = log_state.search_query.clone();
+                            log_state.current_match_index = 0;
+                        }
+                        
+                        log_state.search_matches = all_matches;
+                        log_state.is_searching = false;
+                        
+                        if let Some(&match_pos) = log_state.search_matches.get(log_state.current_match_index) {
+                            log_state.scroll_offset = match_pos;
+                        }
+                    }
+                }
+                KeyCode::Char(c) => {
+                    log_state.search_query.push(c);
+                }
+                KeyCode::Backspace => {
+                    log_state.search_query.pop();
+                }
+                KeyCode::Esc => {
+                    log_state.is_searching = false;
+                    log_state.search_query.clear();
+                    log_state.search_matches.clear();
+                }
+                _ => {}
+            }
+        } else {
+            match key.code {
+                KeyCode::Up => {
+                    if log_state.scroll_offset > 0 {
+                        log_state.scroll_offset -= 1;
+                    }
+                }
+                KeyCode::Down => {
+                    if log_state.scroll_offset < log_state.lines.len().saturating_sub(1) {
+                        log_state.scroll_offset += 1;
+                    }
+                }
+                KeyCode::PageUp => {
+                    log_state.scroll_offset = log_state.scroll_offset.saturating_sub(20);
+                }
+                KeyCode::PageDown => {
+                    log_state.scroll_offset = (log_state.scroll_offset + 20)
+                        .min(log_state.lines.len().saturating_sub(1));
+                }
+                KeyCode::Home => {
+                    log_state.scroll_offset = 0;
+                }
+                KeyCode::End => {
+                    log_state.scroll_offset = log_state.lines.len().saturating_sub(1);
+                }
+                KeyCode::Char('g') => {
+                    log_state.scroll_offset = 0;
+                }
+                KeyCode::Char('G') => {
+                    log_state.scroll_offset = log_state.lines.len().saturating_sub(1);
+                }
+                KeyCode::Char(' ') => {
+                    log_state.scroll_offset = (log_state.scroll_offset + 20)
+                        .min(log_state.lines.len().saturating_sub(1));
+                }
+                KeyCode::Char('/') => {
+                    log_state.is_searching = true;
+                    log_state.search_query = log_state.previous_query.clone();
+                    log_state.search_matches.clear();
+                }
+                KeyCode::Char('n') => {
+                    if !log_state.search_matches.is_empty() {
+                        log_state.current_match_index = (log_state.current_match_index + 1)
+                            % log_state.search_matches.len();
+                        log_state.scroll_offset = log_state.search_matches[log_state.current_match_index];
+                    }
+                }
+                KeyCode::Char('N') => {
+                    if !log_state.search_matches.is_empty() {
+                        log_state.current_match_index = if log_state.current_match_index == 0 {
+                            log_state.search_matches.len() - 1
+                        } else {
+                            log_state.current_match_index - 1
+                        };
+                        log_state.scroll_offset = log_state.search_matches[log_state.current_match_index];
+                    }
+                }
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    app.state = AppState::Normal;
+                }
+                _ => {}
+            }
         }
     }
     Ok(None)

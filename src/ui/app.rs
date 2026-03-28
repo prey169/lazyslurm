@@ -13,7 +13,26 @@ pub enum AppEvent {
     Quit,
 }
 
-#[derive(Clone, Eq, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
+pub enum LogType {
+    Output,
+    Error,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct JobLogState {
+    pub log_type: LogType,
+    pub lines: Vec<String>,
+    pub scroll_offset: usize,
+    pub search_query: String,
+    pub search_matches: Vec<usize>,
+    pub current_match_index: usize,
+    pub is_searching: bool,
+    pub file_path: String,
+    pub previous_query: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum AppState {
     Normal,
     Feedback,
@@ -33,6 +52,7 @@ pub enum AppState {
         search: String,
         visible_indices: Vec<usize>,
     },
+    JobLogPopup(JobLogState),
 }
 
 #[derive(Debug)]
@@ -161,6 +181,68 @@ impl App {
             Err(e) => self.error_message = Some(format!("Failed to fetch users: {}", e)),
         }
         Ok(())
+    }
+
+    pub fn load_job_log(&self, job: &Job, log_type: LogType) -> JobLogState {
+        let log_paths = SlurmParser::get_job_log_paths(job);
+
+        let target_suffix = match log_type {
+            LogType::Output => "out",
+            LogType::Error => "err",
+        };
+
+        let mut found_path: Option<String> = None;
+        let mut content = String::new();
+
+        for path in &log_paths {
+            if path.ends_with(&format!(".{target_suffix}"))
+                || (target_suffix == "out" && !path.ends_with(".err"))
+            {
+                if let Ok(read_content) = std::fs::read_to_string(path) {
+                    found_path = Some(path.clone());
+                    content = read_content;
+                    break;
+                }
+            }
+        }
+
+        if found_path.is_none() {
+            for path in &log_paths {
+                if std::path::Path::new(path).exists() {
+                    if let Ok(read_content) = std::fs::read_to_string(path) {
+                        found_path = Some(path.clone());
+                        content = read_content;
+                        break;
+                    }
+                }
+            }
+        }
+
+        let lines: Vec<String> = if content.is_empty() {
+            vec!["No log file found.".to_string()]
+        } else {
+            content.lines().map(|s| s.to_string()).collect()
+        };
+
+        let file_path = found_path.unwrap_or_else(|| {
+            if log_type == LogType::Output {
+                "output log".to_string()
+            } else {
+                "error log".to_string()
+            }
+        });
+
+        JobLogState {
+            log_type,
+            lines,
+            scroll_offset: 0,
+            search_query: String::new(),
+            search_matches: Vec::new(),
+            current_match_index: 0,
+            is_searching: false,
+            file_path,
+            previous_query: String::new(),
+        }
     }
 
     pub async fn refresh_jobs(&mut self) -> Result<()> {
