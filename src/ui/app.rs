@@ -1,5 +1,5 @@
 use anyhow::Result;
-use ratatui::widgets::ListState;
+use ratatui::widgets::{ListState, TableState};
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
@@ -83,6 +83,7 @@ pub struct App {
     pub job_list: JobList,
     pub state: AppState,
     pub job_list_state: ListState,
+    pub job_table_state: TableState,
     pub selected_job: Option<Job>,
     pub current_user: Option<String>,
     pub current_partition: Option<String>,
@@ -120,11 +121,14 @@ impl App {
         user_list_state.select_first();
         let mut sort_list_state = ListState::default();
         sort_list_state.select_first();
+        let mut job_table_state = TableState::default();
+        job_table_state.select_first();
 
         Self {
             job_list: JobList::new(),
             state: AppState::Normal,
             job_list_state: ListState::default(),
+            job_table_state,
             selected_job: None,
             current_user: std::env::var("USER").ok(),
             current_partition: None,
@@ -223,12 +227,10 @@ impl App {
 
         if found_path.is_none() {
             for path in &log_paths {
-                if std::path::Path::new(path).exists() {
-                    if let Ok(read_content) = std::fs::read_to_string(path) {
-                        found_path = Some(path.clone());
-                        content = read_content;
-                        break;
-                    }
+                if let Ok(read_content) = std::fs::read_to_string(path) {
+                    found_path = Some(path.clone());
+                    content = read_content;
+                    break;
                 }
             }
         }
@@ -422,23 +424,56 @@ impl App {
     }
 
     pub fn select_next_job(&mut self) {
-        self.job_list_state.select_next();
-        self.update_selected_job_from_state();
+        if let Some(current) = self.job_table_state.selected() {
+            if current < self.job_list.jobs.len().saturating_sub(1) {
+                self.job_table_state.select_next();
+                self.update_selected_job_from_state();
+            }
+        } else if !self.job_list.jobs.is_empty() {
+            self.job_table_state.select_first();
+            self.update_selected_job_from_state();
+        }
     }
 
     pub fn select_previous_job(&mut self) {
-        self.job_list_state.select_previous();
-        self.update_selected_job_from_state();
+        if let Some(current) = self.job_table_state.selected() {
+            if current > 0 {
+                self.job_table_state.select_previous();
+                self.update_selected_job_from_state();
+            }
+        } else if !self.job_list.jobs.is_empty() {
+            self.job_table_state.select_first();
+            self.update_selected_job_from_state();
+        }
     }
 
     pub fn select_first(&mut self) {
-        self.job_list_state.select_first();
+        self.job_table_state.select_first();
         self.update_selected_job_from_state();
     }
 
     pub fn select_last(&mut self) {
-        self.job_list_state.select_last();
+        self.job_table_state.select_last();
         self.update_selected_job_from_state();
+    }
+
+    pub fn select_page_up(&mut self) {
+        if let Some(current) = self.job_table_state.selected() {
+            let page_size = 10;
+            let new_idx = current.saturating_sub(page_size);
+            self.job_table_state.select(Some(new_idx));
+            self.update_selected_job_from_state();
+        }
+    }
+
+    pub fn select_page_down(&mut self) {
+        if let Some(current) = self.job_table_state.selected() {
+            let page_size = 10;
+            let max_idx = self.job_list.jobs.len().saturating_sub(1);
+            let new_idx = (current + page_size).min(max_idx);
+            self.job_table_state.select(Some(new_idx));
+            self.update_selected_job_from_state();
+        }
     }
 
     pub fn get_selected_job(&self) -> Option<&Job> {
@@ -463,12 +498,12 @@ impl App {
             return;
         }
 
-        match self.job_list_state.selected() {
+        match self.job_table_state.selected() {
             Some(idx) => {
                 self.selected_job = self.job_list.jobs.get(idx).cloned();
             }
             None => {
-                self.job_list_state.select_first();
+                self.job_table_state.select_first();
             }
         }
     }

@@ -5,7 +5,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph, Wrap,
+        Block, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph, Row, Table, Wrap,
         block::{Position, Title},
     },
 };
@@ -42,7 +42,7 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
         .constraints([
             Constraint::Length(1),
             Constraint::Min(0),
-            Constraint::Length(3),
+            Constraint::Length(1),
         ])
         .split(frame.area());
 
@@ -58,18 +58,22 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
 
     render_jobs_list(frame, app, main_chunks[0]);
 
+    let details_height = app
+        .selected_job
+        .as_ref()
+        .map(|j| count_job_detail_lines(j) as u16 + 2)
+        .unwrap_or(3);
+
     let right_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Percentage(40),
-            Constraint::Percentage(40),
-            Constraint::Percentage(20),
+            Constraint::Length(details_height),
+            Constraint::Min(0),
         ])
         .split(main_chunks[1]);
 
     render_job_details(frame, app, right_chunks[0]);
     render_job_logs(frame, app, right_chunks[1]);
-    render_quick_info(frame, app, right_chunks[2]);
 
     render_help_bar(&app.state, frame, chunks[2]);
 
@@ -96,12 +100,20 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
 
             let inner_area = block.inner(popup_area);
 
-            let nodes: Vec<ListItem> = visible_indices
-                .iter()
-                .copied()
-                .map(|idx| {
-                    let node = &app.nodelist[idx];
-                    let checked = app.current_nodelist.contains(node);
+            let show_none = search.is_empty();
+            let total_items = if show_none { 1 } else { 0 } + visible_indices.len();
+
+            let nodes: Vec<ListItem> = (0..total_items)
+                .map(|display_idx| {
+                    let (display_text, is_none, checked, node_idx) = if show_none && display_idx == 0 {
+                        ("None (clear all)".to_string(), true, app.current_nodelist.is_empty(), None)
+                    } else {
+                        let item_idx = if show_none { display_idx - 1 } else { display_idx };
+                        let idx = visible_indices[item_idx];
+                        let node = &app.nodelist[idx];
+                        let checked = app.current_nodelist.contains(node);
+                        (node.clone(), false, checked, Some(idx))
+                    };
 
                     let prefix = if checked { " [✓] " } else { " [ ] " };
 
@@ -111,13 +123,25 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
                         Style::default()
                     };
 
-                    let mut item = ListItem::new(format!("{prefix}{node}")).style(style);
+                    let mut item = ListItem::new(format!("{prefix}{display_text}")).style(style);
 
                     if let Some(selected_idx) = app.node_list_state.selected()
-                        && selected_idx < visible_indices.len()
-                        && visible_indices[selected_idx] == idx
+                        && selected_idx < total_items
                     {
-                        item = item.style(Style::new().bg(Color::DarkGray));
+                        let selected_is_none = show_none && selected_idx == 0;
+                        let selected_node_idx = if show_none {
+                            if selected_idx == 0 {
+                                None
+                            } else {
+                                Some(visible_indices[selected_idx - 1])
+                            }
+                        } else {
+                            Some(visible_indices[selected_idx])
+                        };
+
+                        if (is_none && selected_is_none) || node_idx == selected_node_idx {
+                            item = item.style(Style::new().bg(Color::DarkGray));
+                        }
                     }
 
                     item
@@ -161,24 +185,38 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
             );
         }
         AppState::CancelJobPopup => {
-            let popup_area = centered_rect(30, 7, frame.area());
+            let popup_area = centered_rect_min(40, 15, 30, 5, frame.area());
 
             frame.render_widget(Clear, popup_area);
-            let selected_job_clone = app.selected_job.clone();
-            let popup: Paragraph;
 
-            if let Some(job_clone) = selected_job_clone {
-                let selected_job_id = job_clone.job_id;
-                popup = Paragraph::new(format!("Cancel job id: {selected_job_id}? (y/n)",))
-                    .style(Style::default().fg(Color::White))
+            if let Some(job) = &app.selected_job {
+                let lines = vec![
+                    Line::from(vec![
+                        Span::raw("Cancel "),
+                        Span::styled(&job.name, Style::default().fg(Color::Cyan)),
+                        Span::raw(" ("),
+                        Span::raw(&job.job_id),
+                        Span::raw(")?"),
+                    ]),
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled("y", Style::default().fg(Color::Green)),
+                        Span::raw(" / "),
+                        Span::styled("n", Style::default().fg(Color::Red)),
+                        Span::raw(" / "),
+                        Span::raw("esc"),
+                    ]),
+                ];
+
+                let popup = Paragraph::new(lines)
+                    .style(Style::default().fg(Color::White).bg(Color::Black))
                     .block(
                         Block::default()
                             .borders(Borders::ALL)
-                            .title("Confirm")
-                            .style(Style::default().fg(Color::Yellow)),
+                            .border_style(Style::default().fg(Color::Yellow)),
                     )
-                    .wrap(Wrap { trim: true })
                     .alignment(Alignment::Center);
+
                 frame.render_widget(popup, popup_area);
             } else {
                 app.feedback_message = Some(FeedbackMessage {
@@ -190,7 +228,7 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
             };
         }
         AppState::Feedback => {
-            let popup_area = centered_rect(50, 7, frame.area());
+            let popup_area = centered_rect_min(50, 7, 40, 5, frame.area());
             if let Some(feedback) = &app.feedback_message {
                 let (msg_text, title_text) = feedback.as_parts();
 
@@ -224,20 +262,27 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
 }
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let mut status_text = "LazySlurm".to_string();
+    let running = app.job_list.running_jobs().len();
+    let pending = app.job_list.pending_jobs().len();
+    let completed = app.job_list.completed_jobs().len();
+
+    let job_counts = format!(
+        "Jobs: {} (R:{running} PD:{pending} CD:{completed})",
+        app.job_list.jobs.len()
+    );
+
+    let mut status_text = format!("LazySlurm | {}", job_counts);
 
     if let Some(user) = &app.current_user {
-        status_text.push_str(&format!(" - User: {}", user));
+        status_text.push_str(&format!(" | User: {}", user));
     }
 
     if let Some(part) = &app.current_partition {
-        status_text.push_str(&format!(" - Part: {}", part));
+        status_text.push_str(&format!(" | Part: {}", part));
     }
 
-    status_text.push_str(&format!(" - Jobs: {}", app.job_list.jobs.len()));
-
     if app.is_loading {
-        status_text.push_str(" - Loading...");
+        status_text.push_str(" | Loading...");
     }
 
     if let Some(error) = &app.error_message {
@@ -254,7 +299,20 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_jobs_list(frame: &mut Frame, app: &mut App, area: Rect) {
-    let jobs: Vec<ListItem> = app
+    let header_style = Style::default()
+        .fg(Color::White)
+        .add_modifier(Modifier::BOLD);
+
+    let header = Row::new(vec![
+        Span::styled("ID", header_style),
+        Span::styled("Name", header_style),
+        Span::styled("State", header_style),
+        Span::styled("Time", header_style),
+        Span::styled("Part", header_style),
+    ])
+    .height(1);
+
+    let rows: Vec<Row> = app
         .job_list
         .jobs
         .iter()
@@ -269,62 +327,179 @@ fn render_jobs_list(frame: &mut Frame, app: &mut App, area: Rect) {
             };
 
             let job_id = job.display_id();
-            let job_name = truncate(&job.name, 15);
+            let job_name = truncate(&job.name, 20);
             let time_used = job.time_used.as_deref().unwrap_or("--");
 
-            ListItem::new(Line::from(vec![
-                Span::styled(format!("{:<12} ", job_id), Style::default()),
-                Span::styled(format!("{:<15} ", job_name), Style::default()),
-                Span::styled(format!("{} ", job.state), Style::default().fg(state_color)),
-                Span::styled(time_used.to_string(), Style::default()),
-            ]))
+            Row::new(vec![
+                Span::raw(job_id),
+                Span::raw(job_name),
+                Span::styled(format!("{}", job.state), Style::default().fg(state_color)),
+                Span::raw(time_used),
+                Span::raw(&job.partition),
+            ])
         })
         .collect();
 
     let title = format!("Jobs ({} total)", app.job_list.jobs.len());
 
-    let jobs_list = List::new(jobs)
+    let widths = calculate_table_widths(area.width);
+
+    let table = Table::new(rows, widths)
+        .header(header)
         .block(Block::default().title(title).borders(Borders::ALL))
         .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
-        .highlight_symbol("➤ ")
-        .scroll_padding(2)
-        .repeat_highlight_symbol(false);
+        .highlight_symbol("")
+        .highlight_spacing(HighlightSpacing::Always);
 
-    frame.render_stateful_widget(jobs_list, area, &mut app.job_list_state);
+    frame.render_stateful_widget(table, area, &mut app.job_table_state);
+}
+
+fn calculate_table_widths(available_width: u16) -> [Constraint; 5] {
+    let id_width = 8;
+    let state_width = 6;
+    let time_width = 7;
+    let fixed_width = id_width + state_width + time_width + 3;
+    let min_name = 10;
+    let max_name = 25;
+    let min_part = 8;
+
+    let flex_space = available_width.saturating_sub(fixed_width);
+    let min_needed = min_name + min_part;
+
+    let (name_width, part_width) = if flex_space < min_needed {
+        (min_name, min_part)
+    } else {
+        let extra = flex_space - min_needed;
+        let name_extra = (extra as f32 * 0.6) as u16;
+        let part_extra = extra - name_extra;
+        (
+            (min_name + name_extra).min(max_name),
+            (min_part + part_extra).max(min_part),
+        )
+    };
+
+    [
+        Constraint::Length(id_width),
+        Constraint::Length(name_width),
+        Constraint::Length(state_width),
+        Constraint::Length(time_width),
+        Constraint::Length(part_width),
+    ]
 }
 
 fn render_job_details(frame: &mut Frame, app: &App, area: Rect) {
-    let details = if let Some(job) = app.get_selected_job() {
-        Paragraph::new(format_job_details(job))
+    if let Some(job) = app.get_selected_job() {
+        let lines = build_job_details_lines(job);
+        let height = lines.len() as u16 + 2;
+
+        let details = Paragraph::new(lines)
             .block(Block::default().title("Job Details").borders(Borders::ALL))
-            .wrap(Wrap { trim: true })
+            .wrap(Wrap { trim: true });
+
+        let inner_area = Rect::new(area.x, area.y, area.width, height);
+        frame.render_widget(details, inner_area);
     } else if app.job_list.jobs.is_empty() {
-        let lines = vec![
-            Line::from(""),
-            Line::from("        L A Z Y S L U R M       "),
-            Line::from("    Tom Hill 2025 - tom@hill.xyz"),
-            Line::from(""),
-            Line::from(""),
-            Line::from("No jobs found!"),
-            Line::from(""),
-            Line::from("Try running: lazyslurm --user <username>"),
-            Line::from("or check if SLURM is available."),
-            Line::from(""),
-            Line::from(Span::styled(
-                "\"We do not remember days; we remember moments.\" - Cesare Pavese",
-                Style::default().add_modifier(Modifier::ITALIC),
-            )),
-        ];
-        Paragraph::new(lines)
-            .block(Block::default().title("Job Details").borders(Borders::ALL))
-            .wrap(Wrap { trim: false })
-    } else {
-        Paragraph::new("Select a job to view details")
+        let text = Paragraph::new("No jobs found.\nTry: lazyslurm --user <username>")
             .block(Block::default().title("Job Details").borders(Borders::ALL))
             .wrap(Wrap { trim: true })
+            .alignment(Alignment::Center);
+        frame.render_widget(text, area);
+    } else {
+        let text = Paragraph::new("Select a job to view details")
+            .block(Block::default().title("Job Details").borders(Borders::ALL))
+            .wrap(Wrap { trim: true });
+        frame.render_widget(text, area);
+    }
+}
+
+fn count_job_detail_lines(job: &Job) -> usize {
+    let mut count = 2;
+    if job.nodes.is_some() {
+        count += 1;
+    }
+    if job.node_list.is_some() {
+        count += 1;
+    }
+    if job.submit_time.is_some() || job.start_time.is_some() {
+        count += 1;
+    }
+    if job.reason.is_some() {
+        count += 1;
+    }
+    count
+}
+
+fn build_job_details_lines(job: &Job) -> Vec<Line<'_>> {
+    let state_color = match job.state {
+        JobState::Running => Color::Green,
+        JobState::Pending => Color::Yellow,
+        JobState::Completed => Color::Cyan,
+        JobState::Failed => Color::Red,
+        JobState::Cancelled => Color::Magenta,
+        _ => Color::Gray,
     };
 
-    frame.render_widget(details, area);
+    let label_style = Style::default().fg(Color::DarkGray);
+    let state_style = Style::default().fg(state_color);
+    let sep = |c: &'static str| Span::styled(c, Style::default().fg(Color::DarkGray));
+
+    let mut lines = Vec::new();
+
+    lines.push(Line::from(vec![
+        Span::styled("ID: ", label_style),
+        Span::raw(job.display_id()),
+        sep(" | "),
+        Span::styled("User: ", label_style),
+        Span::raw(&job.user),
+        sep(" | "),
+        Span::styled("Part: ", label_style),
+        Span::raw(&job.partition),
+    ]));
+
+    lines.push(Line::from(vec![
+        Span::styled("State: ", label_style),
+        Span::styled(format!("{}", job.state), state_style),
+        sep(" | "),
+        Span::styled("Time: ", label_style),
+        Span::raw(job.time_used.as_deref().unwrap_or("--")),
+    ]));
+
+    if let Some(nodes) = job.nodes {
+        lines.push(Line::from(vec![
+            Span::styled("Nodes: ", label_style),
+            Span::raw(nodes.to_string()),
+        ]));
+    }
+
+    if let Some(node_list) = &job.node_list {
+        lines.push(Line::from(vec![
+            Span::styled("Node List: ", label_style),
+            Span::raw(node_list),
+        ]));
+    }
+
+    if job.submit_time.is_some() || job.start_time.is_some() {
+        let mut spans = Vec::new();
+        if let Some(submit_time) = &job.submit_time {
+            spans.push(Span::raw(format!("Submitted: {}", submit_time.format("%Y-%m-%d %H:%M"))));
+        }
+        if job.submit_time.is_some() && job.start_time.is_some() {
+            spans.push(sep(" | "));
+        }
+        if let Some(start_time) = &job.start_time {
+            spans.push(Span::raw(format!("Started: {}", start_time.format("%Y-%m-%d %H:%M"))));
+        }
+        lines.push(Line::from(spans));
+    }
+
+    if let Some(reason) = &job.reason {
+        lines.push(Line::from(vec![
+            Span::styled("Reason: ", label_style),
+            Span::raw(reason),
+        ]));
+    }
+
+    lines
 }
 
 fn render_job_logs(frame: &mut Frame, app: &App, area: Rect) {
@@ -342,122 +517,41 @@ fn render_job_logs(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(logs, area);
 }
 
-fn render_quick_info(frame: &mut Frame, app: &App, area: Rect) {
-    let running_count = app.running_jobs().len();
-    let pending_count = app.pending_jobs().len();
-    let completed_count = app.completed_jobs().len();
-
-    let content = format!(
-        "Running: {} | Pending: {} | Completed: {}",
-        running_count, pending_count, completed_count
-    );
-
-    let quick_info =
-        Paragraph::new(content).block(Block::default().title("Summary").borders(Borders::ALL));
-
-    frame.render_widget(quick_info, area);
-}
-
 fn render_help_bar(app_state: &AppState, frame: &mut Frame, area: Rect) {
     let help_text = match app_state {
         AppState::Normal => {
-            "q: quit | ↑↓: navigate | r: refresh | c: cancel | p: partitions | u: users | n: nodes | o: output | e: error | s: sort"
+            "q:quit | r:refresh | c:cancel | p:part | u:user | n:node | s:sort | o:out | e:err | ↑↓:nav"
         }
-        AppState::CancelJobPopup => "y: confirm | n: reject | esc: reject",
-        AppState::PartitionSearchPopup => "esc: close | Enter: submit",
-        AppState::UserSearchPopup => "esc: close | Enter: submit",
+        AppState::CancelJobPopup => "y:confirm | n:reject | esc:cancel",
+        AppState::PartitionSearchPopup => "esc:close | Enter:select",
+        AppState::UserSearchPopup => "esc:close | Enter:select",
         AppState::NodelistSelectPopup { .. } => {
-            "esc: close | Enter: submit | Space: toggle | Search: <chars> | Ctrl-a/d/i: select/deselect/invert"
+            "esc:cancel | Enter:close | Space:toggle | Ctrl-a/d/i:select/deselect/invert"
         }
         AppState::PartitionSelectPopup { .. } => {
-            "esc: close | ↑↓: navigate | Enter: select | Search: <chars>"
+            "esc:close | ↑↓:nav | Enter:select"
         }
         AppState::UserSelectPopup { .. } => {
-            "esc: close | ↑↓: navigate | Enter: select | Search: <chars>"
+            "esc:close | ↑↓:nav | Enter:select"
         }
         AppState::JobLogPopup(log_state) => {
             if log_state.is_searching {
-                "Enter: search | Backspace: delete | Esc: cancel search"
+                "Enter:search | Backspace:delete | Esc:cancel"
             } else {
-                "↑↓ scroll | PgUp/PgDn/Space page | g/G top/bottom | / search | n/N next/prev | Esc close"
+                "↑↓/PgUp/PgDn:scroll | g/G:top/bottom | /:search | n/N:next/prev | Esc:close"
             }
         }
         AppState::SortSelectPopup { .. } => {
-            "esc: close | ↑↓: navigate | Enter: select"
+            "esc:close | ↑↓:nav | Enter:select"
         }
         AppState::Feedback => "",
     };
-    let help = Paragraph::new(help_text)
-        .block(Block::default().borders(Borders::ALL))
-        .style(Style::default().fg(Color::Gray));
 
-    frame.render_widget(help, area);
-}
+    let help_bar = Paragraph::new(help_text)
+        .style(Style::new().bg(Color::DarkGray).fg(Color::White))
+        .alignment(Alignment::Center);
 
-fn format_job_details(job: &Job) -> String {
-    let mut details = Vec::new();
-
-    let state_description = match job.state {
-        JobState::Running => "Running",
-        JobState::Pending => "Pending",
-        JobState::Completed => "Completed",
-        JobState::Cancelled => "Cancelled",
-        JobState::Failed => "Failed",
-        JobState::Timeout => "Timeout",
-        JobState::NodeFail => "Node Fail",
-        JobState::Preempted => "Preempted",
-        JobState::Unknown(_) => "Unknown",
-    };
-
-    details.push(format!("Job ID: {}", job.display_id()));
-    details.push(format!("Name: {}", job.name));
-    details.push(format!("User: {}", job.user));
-    details.push(format!("State: {} ({})", job.state, state_description));
-    details.push(format!("Partition: {}", job.partition));
-
-    if let Some(nodes) = job.nodes {
-        details.push(format!("Nodes: {}", nodes));
-    }
-
-    if let Some(node_list) = &job.node_list {
-        details.push(format!("Node List: {}", node_list));
-    }
-
-    if let Some(submit_time) = &job.submit_time {
-        details.push(format!(
-            "Submitted: {}",
-            submit_time.format("%Y-%m-%d %H:%M:%S")
-        ));
-    }
-
-    if let Some(start_time) = &job.start_time {
-        details.push(format!(
-            "Started: {}",
-            start_time.format("%Y-%m-%d %H:%M:%S")
-        ));
-    }
-
-    if let Some(duration) = job.duration() {
-        let total_seconds = duration.num_seconds();
-        let hours = total_seconds / 3600;
-        let minutes = (total_seconds % 3600) / 60;
-        let seconds = total_seconds % 60;
-        details.push(format!("Duration: {}h {}m {}s", hours, minutes, seconds));
-    }
-
-    if let Some(working_dir) = &job.working_dir {
-        details.push(format!("Work Dir: {}", working_dir));
-    }
-
-    if let Some(std_out) = &job.std_out {
-        details.push(format!("Log File: {}", std_out));
-    }
-
-    if let Some(reason) = &job.reason {
-        details.push(format!("Reason: {}", reason));
-    }
-
-    details.join("\n")
+    frame.render_widget(help_bar, area);
 }
 
 fn read_job_logs(job: &Job, max_lines: usize) -> String {
@@ -585,8 +679,7 @@ fn render_sort_popup(frame: &mut Frame, app: &mut App, area: Rect) {
 
     let list_items: Vec<ListItem> = sort_options
         .iter()
-        .enumerate()
-        .map(|(_, sort_field)| {
+        .map(|sort_field| {
             let display_name = sort_field.display_name();
             let is_selected = *sort_field == current_sort;
             
@@ -755,4 +848,14 @@ fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
             Constraint::Percentage((100 - percent_x) / 2),
         ])
         .split(popup_layout[1])[1]
+}
+
+fn centered_rect_min(percent_x: u16, percent_y: u16, min_w: u16, min_h: u16, r: Rect) -> Rect {
+    let target_w = (r.width as f32 * percent_x as f32 / 100.0).ceil() as u16;
+    let target_h = (r.height as f32 * percent_y as f32 / 100.0).ceil() as u16;
+    let w = target_w.max(min_w).min(r.width.saturating_sub(2));
+    let h = target_h.max(min_h).min(r.height.saturating_sub(2));
+    let x = (r.width - w) / 2 + r.x;
+    let y = (r.height - h) / 2 + r.y;
+    Rect::new(x, y, w, h)
 }

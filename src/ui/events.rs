@@ -75,6 +75,18 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
             app.select_next_job();
         }
+        (KeyCode::PageUp, _) => {
+            app.select_page_up();
+        }
+        (KeyCode::PageDown, _) => {
+            app.select_page_down();
+        }
+        (KeyCode::Home, _) => {
+            app.select_first();
+        }
+        (KeyCode::End, _) => {
+            app.select_last();
+        }
         (KeyCode::Char('u'), _) => {
             app.user_list_state.select_first();
             let search = String::new();
@@ -196,12 +208,15 @@ async fn event_nodelist_select_popup(
             }
 
             KeyCode::Char('a') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                let visible_nodes: Vec<String> = visible_indices
-                    .iter()
-                    .map(|&idx| app.nodelist[idx].clone())
-                    .collect();
-
-                app.current_nodelist = visible_nodes;
+                if search.is_empty() {
+                    app.current_nodelist.clear();
+                } else {
+                    let visible_nodes: Vec<String> = visible_indices
+                        .iter()
+                        .map(|&idx| app.nodelist[idx].clone())
+                        .collect();
+                    app.current_nodelist = visible_nodes;
+                }
             }
 
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -242,7 +257,11 @@ async fn event_nodelist_select_popup(
             }
 
             KeyCode::End => {
-                app.node_list_state.select_last();
+                if search.is_empty() {
+                    app.node_list_state.select(Some(visible_indices.len()));
+                } else {
+                    app.node_list_state.select_last();
+                }
             }
 
             KeyCode::Char(c) if c.is_alphanumeric() || c == '.' || c == '-' || c == '_' => {
@@ -258,16 +277,22 @@ async fn event_nodelist_select_popup(
             }
 
             KeyCode::Char(' ') => {
-                if let Some(selected_idx) = app.node_list_state.selected()
-                    && let Some(&actual_idx) = visible_indices.get(selected_idx)
-                    && let Some(node) = app.nodelist.get(actual_idx)
-                {
-                    let node = node.clone();
-
-                    if app.current_nodelist.contains(&node) {
-                        app.current_nodelist.retain(|n| n != &node);
+                if let Some(selected_idx) = app.node_list_state.selected() {
+                    let show_none = search.is_empty();
+                    if show_none && selected_idx == 0 {
+                        app.current_nodelist.clear();
                     } else {
-                        app.current_nodelist.push(node);
+                        let item_idx = if show_none { selected_idx - 1 } else { selected_idx };
+                        if let Some(&actual_idx) = visible_indices.get(item_idx)
+                            && let Some(node) = app.nodelist.get(actual_idx)
+                        {
+                            let node = node.clone();
+                            if app.current_nodelist.contains(&node) {
+                                app.current_nodelist.retain(|n| n != &node);
+                            } else {
+                                app.current_nodelist.push(node);
+                            }
+                        }
                     }
                 }
             }

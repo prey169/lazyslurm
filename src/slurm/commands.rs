@@ -83,13 +83,14 @@ impl SlurmCommands {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
 
-        let nodes: Vec<String> = stdout
+        let mut nodes: Vec<String> = stdout
             .lines()
             .map(str::trim)
             .filter(|line| !line.trim().is_empty())
             .map(str::to_string)
             .collect();
 
+        nodes.dedup();
         Ok(nodes)
     }
 
