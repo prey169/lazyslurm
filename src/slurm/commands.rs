@@ -100,4 +100,63 @@ impl SlurmCommands {
             .map(|output| output.status.success())
             .unwrap_or(false)
     }
+
+    pub async fn sinfo_show_partitions() -> Result<Vec<String>> {
+        let output = TokioCommand::new("sinfo")
+            .args(["-ho", "%P"])
+            .output()
+            .await
+            .context("Failed to execute sinfo")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("sinfo failed: {}", stderr.trim());
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        let mut partitions: Vec<String> = stdout
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .map(|line| line.trim_end_matches('*').to_string())
+            .filter(|line| {
+                !line.is_empty()
+                    && line.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+                    && line.len() >= 2
+            })
+            .collect();
+
+        partitions.sort();
+        partitions.dedup();
+
+        Ok(partitions)
+    }
+
+    pub async fn squeue_show_users() -> Result<Vec<String>> {
+        let output = TokioCommand::new("squeue")
+            .args(["--format=%u"])
+            .output()
+            .await
+            .context("Failed to execute squeue")?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("squeue failed: {}", stderr.trim());
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+
+        let mut users: Vec<String> = stdout
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.trim().is_empty() && *line != "USER")
+            .map(str::to_string)
+            .collect();
+
+        users.sort();
+        users.dedup();
+
+        Ok(users)
+    }
 }

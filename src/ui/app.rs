@@ -25,6 +25,14 @@ pub enum AppState {
         search: String,
         visible_indices: Vec<usize>,
     },
+    PartitionSelectPopup {
+        search: String,
+        visible_indices: Vec<usize>,
+    },
+    UserSelectPopup {
+        search: String,
+        visible_indices: Vec<usize>,
+    },
 }
 
 #[derive(Debug)]
@@ -57,6 +65,10 @@ pub struct App {
     pub nodelist: Vec<String>,
     pub current_nodelist: Vec<String>,
     pub node_list_state: ListState,
+    pub partition_list: Vec<String>,
+    pub user_list: Vec<String>,
+    pub partition_list_state: ListState,
+    pub user_list_state: ListState,
     pub last_refresh: Instant,
     pub refresh_interval: Duration,
     pub is_loading: bool,
@@ -75,6 +87,10 @@ impl App {
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
         let mut node_list_state = ListState::default();
         node_list_state.select_first();
+        let mut partition_list_state = ListState::default();
+        partition_list_state.select_first();
+        let mut user_list_state = ListState::default();
+        user_list_state.select_first();
 
         Self {
             job_list: JobList::new(),
@@ -86,8 +102,12 @@ impl App {
             nodelist: Vec::new(),
             current_nodelist: Vec::new(),
             node_list_state,
+            partition_list: Vec::new(),
+            user_list: Vec::new(),
+            partition_list_state,
+            user_list_state,
             last_refresh: Instant::now(),
-            refresh_interval: Duration::from_secs(2), // Refresh every 2 seconds
+            refresh_interval: Duration::from_secs(2),
             is_loading: false,
             error_message: None,
             event_sender,
@@ -123,6 +143,22 @@ impl App {
         match SlurmCommands::sinfo_show_nodelist().await {
             Ok(nodes) => self.nodelist = nodes,
             Err(e) => self.error_message = Some(format!("Failed to fetch nodes: {}", e)),
+        }
+        Ok(())
+    }
+
+    pub async fn refresh_partitions(&mut self) -> Result<()> {
+        match SlurmCommands::sinfo_show_partitions().await {
+            Ok(partitions) => self.partition_list = partitions,
+            Err(e) => self.error_message = Some(format!("Failed to fetch partitions: {}", e)),
+        }
+        Ok(())
+    }
+
+    pub async fn refresh_users(&mut self) -> Result<()> {
+        match SlurmCommands::squeue_show_users().await {
+            Ok(users) => self.user_list = users,
+            Err(e) => self.error_message = Some(format!("Failed to fetch users: {}", e)),
         }
         Ok(())
     }

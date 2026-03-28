@@ -122,6 +122,8 @@ async fn run_app(
 ) -> Result<(), Box<dyn Error>> {
     // Initial refresh
     app.refresh_jobs().await?;
+    app.refresh_partitions().await?;
+    app.refresh_users().await?;
 
     events::run_event_loop(app, terminal).await?;
 

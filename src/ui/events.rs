@@ -16,6 +16,8 @@ pub async fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<Option<()>
         AppState::CancelJobPopup => event_cancel_popup(app, key).await,
         AppState::PartitionSearchPopup => event_partition_search_popup(app, key).await,
         AppState::NodelistSelectPopup { .. } => event_nodelist_select_popup(app, key).await,
+        AppState::PartitionSelectPopup { .. } => event_partition_select_popup(app, key).await,
+        AppState::UserSelectPopup { .. } => event_user_select_popup(app, key).await,
     }
 }
 
@@ -67,10 +69,22 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
             app.select_next_job();
         }
         (KeyCode::Char('u'), _) => {
-            app.state = AppState::UserSearchPopup;
+            app.user_list_state.select_first();
+            let search = String::new();
+            let visible_indices = fuzzy_filter(&app.user_list, &search);
+            app.state = AppState::UserSelectPopup {
+                search,
+                visible_indices,
+            };
         }
         (KeyCode::Char('p'), _) => {
-            app.state = AppState::PartitionSearchPopup;
+            app.partition_list_state.select_first();
+            let search = String::new();
+            let visible_indices = fuzzy_filter(&app.partition_list, &search);
+            app.state = AppState::PartitionSelectPopup {
+                search,
+                visible_indices,
+            };
         }
         (KeyCode::Char('n'), _) => {
             app.current_nodelist
@@ -108,27 +122,29 @@ async fn event_user_search_popup(
     Ok(None)
 }
 
-fn update_visible_nodes(nodelist: &[String], search: &str, visible_indices: &mut Vec<usize>) {
+fn fuzzy_filter(items: &[String], search: &str) -> Vec<usize> {
     let query = search.to_lowercase();
 
-    let filtered: Vec<(String, usize)> = nodelist
+    if search.is_empty() {
+        return (0..items.len()).collect();
+    }
+
+    items
         .iter()
         .enumerate()
-        .filter_map(|(idx, node)| {
-            if search.is_empty() {
-                return Some((node.clone(), idx));
-            }
-
-            let lower_node = node.to_lowercase();
-            if sublime_fuzzy::best_match(&query, &lower_node).is_some() {
-                Some((node.clone(), idx))
+        .filter_map(|(idx, item)| {
+            let lower_item = item.to_lowercase();
+            if sublime_fuzzy::best_match(&query, &lower_item).is_some() {
+                Some(idx)
             } else {
                 None
             }
         })
-        .collect();
+        .collect()
+}
 
-    *visible_indices = filtered.into_iter().map(|(_, idx)| idx).collect();
+fn update_visible_nodes(nodelist: &[String], search: &str, visible_indices: &mut Vec<usize>) {
+    *visible_indices = fuzzy_filter(nodelist, search);
 }
 
 async fn event_partition_search_popup(
@@ -221,8 +237,9 @@ async fn event_nodelist_select_popup(
             }
 
             KeyCode::Char(' ') => {
-                if let Some(index) = app.node_list_state.selected()
-                    && let Some(node) = app.nodelist.get(index)
+                if let Some(selected_idx) = app.node_list_state.selected()
+                    && let Some(&actual_idx) = visible_indices.get(selected_idx)
+                    && let Some(node) = app.nodelist.get(actual_idx)
                 {
                     let node = node.clone();
 
@@ -270,6 +287,130 @@ async fn event_cancel_popup(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         _ => {}
     }
     app.handle_cancel_popup().await?;
+    Ok(None)
+}
+
+async fn event_partition_select_popup(
+    app: &mut App,
+    key: KeyEvent,
+) -> Result<Option<()>, Box<dyn Error>> {
+    if let AppState::PartitionSelectPopup {
+        search,
+        visible_indices,
+        ..
+    } = &mut app.state
+    {
+        match key.code {
+            KeyCode::Down => {
+                app.partition_list_state.select_next();
+            }
+            KeyCode::Up => {
+                app.partition_list_state.select_previous();
+            }
+            KeyCode::Home => {
+                app.partition_list_state.select_first();
+            }
+            KeyCode::End => {
+                app.partition_list_state.select_last();
+            }
+            KeyCode::Char(c) if c.is_alphanumeric() || c == '_' || c == '-' => {
+                search.push(c);
+                *visible_indices = fuzzy_filter(&app.partition_list, search);
+                app.partition_list_state.select_first();
+            }
+            KeyCode::Backspace => {
+                search.pop();
+                *visible_indices = fuzzy_filter(&app.partition_list, search);
+                app.partition_list_state.select_first();
+            }
+            KeyCode::Enter => {
+                if let Some(selected_idx) = app.partition_list_state.selected() {
+                    if search.is_empty() && selected_idx == 0 {
+                        app.current_partition = None;
+                    } else {
+                        let item_idx = if search.is_empty() {
+                            selected_idx - 1
+                        } else {
+                            selected_idx
+                        };
+                        if let Some(&actual_idx) = visible_indices.get(item_idx)
+                            && let Some(partition) = app.partition_list.get(actual_idx)
+                        {
+                            app.current_partition = Some(partition.clone());
+                        }
+                    }
+                }
+                app.state = AppState::Normal;
+                app.refresh_jobs().await?;
+            }
+            KeyCode::Esc => {
+                app.state = AppState::Normal;
+            }
+            _ => {}
+        }
+    }
+    Ok(None)
+}
+
+async fn event_user_select_popup(
+    app: &mut App,
+    key: KeyEvent,
+) -> Result<Option<()>, Box<dyn Error>> {
+    if let AppState::UserSelectPopup {
+        search,
+        visible_indices,
+        ..
+    } = &mut app.state
+    {
+        match key.code {
+            KeyCode::Down => {
+                app.user_list_state.select_next();
+            }
+            KeyCode::Up => {
+                app.user_list_state.select_previous();
+            }
+            KeyCode::Home => {
+                app.user_list_state.select_first();
+            }
+            KeyCode::End => {
+                app.user_list_state.select_last();
+            }
+            KeyCode::Char(c) if c.is_alphanumeric() || c == '_' || c == '-' => {
+                search.push(c);
+                *visible_indices = fuzzy_filter(&app.user_list, search);
+                app.user_list_state.select_first();
+            }
+            KeyCode::Backspace => {
+                search.pop();
+                *visible_indices = fuzzy_filter(&app.user_list, search);
+                app.user_list_state.select_first();
+            }
+            KeyCode::Enter => {
+                if let Some(selected_idx) = app.user_list_state.selected() {
+                    if search.is_empty() && selected_idx == 0 {
+                        app.current_user = None;
+                    } else {
+                        let item_idx = if search.is_empty() {
+                            selected_idx - 1
+                        } else {
+                            selected_idx
+                        };
+                        if let Some(&actual_idx) = visible_indices.get(item_idx)
+                            && let Some(user) = app.user_list.get(actual_idx)
+                        {
+                            app.current_user = Some(user.clone());
+                        }
+                    }
+                }
+                app.state = AppState::Normal;
+                app.refresh_jobs().await?;
+            }
+            KeyCode::Esc => {
+                app.state = AppState::Normal;
+            }
+            _ => {}
+        }
+    }
     Ok(None)
 }
 

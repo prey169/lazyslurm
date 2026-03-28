@@ -5,7 +5,7 @@ use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{
-        Block, Borders, Clear, HighlightSpacing, List, ListItem, Paragraph, Wrap,
+        Block, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Paragraph, Wrap,
         block::{Position, Title},
     },
 };
@@ -138,6 +138,34 @@ pub fn render_app(frame: &mut Frame, app: &mut App) {
                 .highlight_spacing(HighlightSpacing::Always);
 
             frame.render_stateful_widget(list, inner_area, &mut app.node_list_state);
+        }
+        AppState::PartitionSelectPopup {
+            visible_indices,
+            search,
+            ..
+        } => {
+            render_select_popup(
+                frame,
+                "Select Partition",
+                search,
+                visible_indices,
+                &app.partition_list,
+                &mut app.partition_list_state,
+            );
+        }
+        AppState::UserSelectPopup {
+            visible_indices,
+            search,
+            ..
+        } => {
+            render_select_popup(
+                frame,
+                "Select User",
+                search,
+                visible_indices,
+                &app.user_list,
+                &mut app.user_list_state,
+            );
         }
         AppState::CancelJobPopup => {
             let popup_area = centered_rect(30, 7, frame.area());
@@ -335,13 +363,19 @@ fn render_quick_info(frame: &mut Frame, app: &App, area: Rect) {
 fn render_help_bar(app_state: &AppState, frame: &mut Frame, area: Rect) {
     let help_text = match app_state {
         AppState::Normal => {
-            "q: quit | ↑↓: navigate | r: refresh | c: cancel job | p: search partition | u: search user | n: filter nodes"
+            "q: quit | ↑↓: navigate | r: refresh | c: cancel job | p: partitions | u: users | n: filter nodes"
         }
         AppState::CancelJobPopup => "y: confirm | n: reject | esc: reject",
         AppState::PartitionSearchPopup => "esc: close | Enter: submit",
         AppState::UserSearchPopup => "esc: close | Enter: submit",
         AppState::NodelistSelectPopup { .. } => {
-            "esc: close | Enter: submit | Search: <chars> | Ctrl-a: Select visible | Ctrl-d: Deselect visible | Ctrl-i Invert visible"
+            "esc: close | Enter: submit | Space: toggle | Search: <chars> | Ctrl-a/d/i: select/deselect/invert"
+        }
+        AppState::PartitionSelectPopup { .. } => {
+            "esc: close | ↑↓: navigate | Enter: select | Search: <chars>"
+        }
+        AppState::UserSelectPopup { .. } => {
+            "esc: close | ↑↓: navigate | Enter: select | Search: <chars>"
         }
         AppState::Feedback => "",
     };
@@ -455,6 +489,79 @@ fn read_job_logs(job: &Job, max_lines: usize) -> String {
     } else {
         format!("No logs found. Checked paths:\n{}", log_paths.join("\n"))
     }
+}
+
+fn render_select_popup(
+    frame: &mut Frame,
+    title: &str,
+    search: &str,
+    visible_indices: &[usize],
+    items: &[String],
+    list_state: &mut ListState,
+) {
+    let popup_area = centered_rect(40, 60, frame.area());
+
+    frame.render_widget(Clear, popup_area);
+
+    let block = Block::bordered()
+        .title(title.to_string())
+        .title(
+            Title::from(format!(" Search: [{}] ", search)).position(Position::Bottom),
+        )
+        .border_style(Style::new().fg(Color::Cyan));
+
+    let inner_area = block.inner(popup_area);
+
+    let total_items = if search.is_empty() { 1 } else { 0 } + visible_indices.len();
+
+    let list_items: Vec<ListItem> = (0..total_items)
+        .map(|display_idx| {
+            let (display_text, actual_idx_for_style) = if search.is_empty() && display_idx == 0 {
+                ("None (show all)".to_string(), None)
+            } else {
+                let item_idx = if search.is_empty() {
+                    display_idx - 1
+                } else {
+                    display_idx
+                };
+                let actual_idx = visible_indices.get(item_idx).copied().unwrap_or(0);
+                (
+                    items.get(actual_idx).cloned().unwrap_or_default(),
+                    Some(actual_idx),
+                )
+            };
+
+            let mut item = ListItem::new(format!("  {}", display_text));
+
+            if let Some(selected_idx) = list_state.selected()
+                && selected_idx < total_items
+            {
+                let selected_actual = if search.is_empty() && selected_idx == 0 {
+                    None
+                } else {
+                    let item_idx = if search.is_empty() {
+                        selected_idx - 1
+                    } else {
+                        selected_idx
+                    };
+                    visible_indices.get(item_idx).copied()
+                };
+                if actual_idx_for_style == selected_actual {
+                    item = item.style(Style::new().bg(Color::DarkGray));
+                }
+            }
+
+            item
+        })
+        .collect();
+
+    let list = List::new(list_items)
+        .block(block)
+        .highlight_style(Style::new().bg(Color::Blue).add_modifier(Modifier::BOLD))
+        .highlight_symbol("➤ ")
+        .highlight_spacing(HighlightSpacing::Always);
+
+    frame.render_stateful_widget(list, inner_area, list_state);
 }
 
 fn truncate(s: &str, max_len: usize) -> String {
