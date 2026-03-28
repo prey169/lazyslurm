@@ -5,6 +5,7 @@ use tokio::sync::mpsc;
 
 use crate::models::{Job, JobList};
 use crate::slurm::{SlurmCommands, SlurmParser};
+use crate::utils::SortField;
 
 #[derive(Debug, Clone)]
 pub enum AppEvent {
@@ -52,6 +53,9 @@ pub enum AppState {
         search: String,
         visible_indices: Vec<usize>,
     },
+    SortSelectPopup {
+        visible_indices: Vec<usize>,
+    },
     JobLogPopup(JobLogState),
 }
 
@@ -89,6 +93,9 @@ pub struct App {
     pub user_list: Vec<String>,
     pub partition_list_state: ListState,
     pub user_list_state: ListState,
+    pub sort_field: SortField,
+    pub sort_list_state: ListState,
+    pub config: Option<crate::utils::Config>,
     pub last_refresh: Instant,
     pub refresh_interval: Duration,
     pub is_loading: bool,
@@ -111,6 +118,8 @@ impl App {
         partition_list_state.select_first();
         let mut user_list_state = ListState::default();
         user_list_state.select_first();
+        let mut sort_list_state = ListState::default();
+        sort_list_state.select_first();
 
         Self {
             job_list: JobList::new(),
@@ -126,6 +135,9 @@ impl App {
             user_list: Vec::new(),
             partition_list_state,
             user_list_state,
+            sort_field: SortField::default(),
+            sort_list_state,
+            config: None,
             last_refresh: Instant::now(),
             refresh_interval: Duration::from_secs(2),
             is_loading: false,
@@ -145,6 +157,7 @@ impl App {
         partition: Option<String>,
         nodelist: Vec<String>,
         all_users: bool,
+        config: crate::utils::Config,
     ) -> Self {
         let mut app = Self::new();
         if user.is_some() {
@@ -156,6 +169,8 @@ impl App {
         }
         app.current_partition = partition;
         app.current_nodelist = nodelist;
+        app.sort_field = config.sort_field;
+        app.config = Some(config);
         app
     }
 
@@ -245,6 +260,121 @@ impl App {
         }
     }
 
+    pub fn sort_jobs(&mut self, field: SortField) {
+        self.sort_field = field;
+        
+        match field {
+            SortField::StateCompletingFirst => {
+                self.job_list.jobs.sort_by(|a, b| {
+                    let order = |job: &Job| match job.state {
+                        crate::models::JobState::Completed => 0,
+                        crate::models::JobState::Failed => 0,
+                        crate::models::JobState::Cancelled => 0,
+                        crate::models::JobState::Timeout => 0,
+                        crate::models::JobState::NodeFail => 0,
+                        crate::models::JobState::Preempted => 0,
+                        crate::models::JobState::Running => 1,
+                        _ => 2,
+                    };
+                    order(a).cmp(&order(b))
+                });
+            }
+            SortField::StatePendingFirst => {
+                self.job_list.jobs.sort_by(|a, b| {
+                    let order = |job: &Job| match job.state {
+                        crate::models::JobState::Pending => 0,
+                        _ => 1,
+                    };
+                    order(a).cmp(&order(b))
+                });
+            }
+            SortField::QueueTimeShortest => {
+                self.job_list.jobs.sort_by(|a, b| {
+                    let a_time = a.submit_time;
+                    let b_time = b.submit_time;
+                    match (a_time, b_time) {
+                        (Some(a), Some(b)) => a.cmp(&b),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    }
+                });
+            }
+            SortField::QueueTimeLongest => {
+                self.job_list.jobs.sort_by(|a, b| {
+                    let a_time = a.submit_time;
+                    let b_time = b.submit_time;
+                    match (a_time, b_time) {
+                        (Some(a), Some(b)) => b.cmp(&a),
+                        (Some(_), None) => std::cmp::Ordering::Greater,
+                        (None, Some(_)) => std::cmp::Ordering::Less,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    }
+                });
+            }
+            SortField::RuntimeShortest => {
+                self.job_list.jobs.sort_by(|a, b| {
+                    let a_dur = a.duration();
+                    let b_dur = b.duration();
+                    match (a_dur, b_dur) {
+                        (Some(a), Some(b)) => a.cmp(&b),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    }
+                });
+            }
+            SortField::RuntimeLongest => {
+                self.job_list.jobs.sort_by(|a, b| {
+                    let a_dur = a.duration();
+                    let b_dur = b.duration();
+                    match (a_dur, b_dur) {
+                        (Some(a), Some(b)) => b.cmp(&a),
+                        (Some(_), None) => std::cmp::Ordering::Greater,
+                        (None, Some(_)) => std::cmp::Ordering::Less,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    }
+                });
+            }
+            SortField::JobIdOldest => {
+                self.job_list.jobs.sort_by(|a, b| a.job_id.cmp(&b.job_id));
+            }
+            SortField::JobIdNewest => {
+                self.job_list.jobs.sort_by(|a, b| b.job_id.cmp(&a.job_id));
+            }
+            SortField::NameAZ => {
+                self.job_list.jobs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+            }
+            SortField::NameZA => {
+                self.job_list.jobs.sort_by(|a, b| b.name.to_lowercase().cmp(&a.name.to_lowercase()));
+            }
+            SortField::SubmittedOldest => {
+                self.job_list.jobs.sort_by(|a, b| {
+                    let a_time = a.submit_time;
+                    let b_time = b.submit_time;
+                    match (a_time, b_time) {
+                        (Some(a), Some(b)) => a.cmp(&b),
+                        (Some(_), None) => std::cmp::Ordering::Less,
+                        (None, Some(_)) => std::cmp::Ordering::Greater,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    }
+                });
+            }
+            SortField::SubmittedNewest => {
+                self.job_list.jobs.sort_by(|a, b| {
+                    let a_time = a.submit_time;
+                    let b_time = b.submit_time;
+                    match (a_time, b_time) {
+                        (Some(a), Some(b)) => b.cmp(&a),
+                        (Some(_), None) => std::cmp::Ordering::Greater,
+                        (None, Some(_)) => std::cmp::Ordering::Less,
+                        (None, None) => std::cmp::Ordering::Equal,
+                    }
+                });
+            }
+        }
+    }
+
     pub async fn refresh_jobs(&mut self) -> Result<()> {
         self.is_loading = true;
         self.error_message = None;
@@ -252,6 +382,7 @@ impl App {
         match self.fetch_jobs().await {
             Ok(jobs) => {
                 self.job_list.update(jobs);
+                self.sort_jobs(self.sort_field);
                 self.update_selected_job_from_state();
                 self.last_refresh = Instant::now();
             }

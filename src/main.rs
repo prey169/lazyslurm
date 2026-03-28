@@ -9,6 +9,7 @@ use std::{error::Error, io};
 
 use lazyslurm::slurm::SlurmCommands;
 use lazyslurm::ui::{App, events};
+use lazyslurm::utils::Config;
 
 #[derive(Parser, Debug)]
 #[command(
@@ -97,7 +98,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     // Create app and run
-    let mut app = App::with_cli(cli.user, cli.partition, cli.nodelist, cli.all_users);
+    let mut app = App::with_cli(cli.user, cli.partition, cli.nodelist, cli.all_users, Config::load());
     let result = run_app(&mut terminal, &mut app).await;
 
     // Restore terminal
@@ -126,6 +127,12 @@ async fn run_app(
     app.refresh_users().await?;
 
     events::run_event_loop(app, terminal).await?;
+
+    if let Some(ref config) = app.config {
+        if let Err(e) = config.save() {
+            eprintln!("Warning: Failed to save config: {}", e);
+        }
+    }
 
     Ok(())
 }

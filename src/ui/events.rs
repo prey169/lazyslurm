@@ -1,5 +1,6 @@
 use crate::app::{App, AppState, LogType};
 use crate::render_app;
+use crate::utils::SortField;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{Terminal, backend::CrosstermBackend};
 use std::{
@@ -25,6 +26,7 @@ pub async fn handle_key_event(app: &mut App, key: KeyEvent) -> Result<Option<()>
         AppState::PartitionSelectPopup { .. } => event_partition_select_popup(app, key).await,
         AppState::UserSelectPopup { .. } => event_user_select_popup(app, key).await,
         AppState::JobLogPopup(_) => event_job_log_popup(app, key).await,
+        AppState::SortSelectPopup { .. } => event_sort_select_popup(app, key).await,
     }
 }
 
@@ -117,6 +119,12 @@ async fn event_normal_state(app: &mut App, key: KeyEvent) -> Result<Option<()>, 
         (KeyCode::Char('e'), _) if app.selected_job.is_some() => {
             let log_state = app.load_job_log(app.selected_job.as_ref().unwrap(), LogType::Error);
             app.state = AppState::JobLogPopup(log_state);
+        }
+        (KeyCode::Char('s'), _) => {
+            app.sort_list_state.select_first();
+            app.state = AppState::SortSelectPopup {
+                visible_indices: (0..SortField::all().len()).collect(),
+            };
         }
         _ => {}
     }
@@ -583,4 +591,48 @@ pub async fn run_event_loop(
             app.state = AppState::Normal;
         }
     }
+}
+
+async fn event_sort_select_popup(
+    app: &mut App,
+    key: KeyEvent,
+) -> Result<Option<()>, Box<dyn Error>> {
+    if let AppState::SortSelectPopup { visible_indices } = &mut app.state {
+        let sort_options = SortField::all();
+        let _max_index = sort_options.len().saturating_sub(1);
+
+        match key.code {
+            KeyCode::Down => {
+                app.sort_list_state.select_next();
+            }
+            KeyCode::Up => {
+                app.sort_list_state.select_previous();
+            }
+            KeyCode::Home => {
+                app.sort_list_state.select_first();
+            }
+            KeyCode::End => {
+                app.sort_list_state.select_last();
+            }
+            KeyCode::Enter => {
+                if let Some(selected_idx) = app.sort_list_state.selected() {
+                    if let Some(&actual_idx) = visible_indices.get(selected_idx) {
+                        if let Some(sort_field) = sort_options.get(actual_idx) {
+                            app.sort_jobs(*sort_field);
+                            if let Some(config) = app.config.as_mut() {
+                                config.sort_field = *sort_field;
+                                let _ = config.save();
+                            }
+                        }
+                    }
+                }
+                app.state = AppState::Normal;
+            }
+            KeyCode::Esc => {
+                app.state = AppState::Normal;
+            }
+            _ => {}
+        }
+    }
+    Ok(None)
 }
