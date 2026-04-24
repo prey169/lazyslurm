@@ -788,6 +788,8 @@ fn render_job_log(frame: &mut Frame, log_state: &crate::ui::JobLogState, area: R
         let search_x = area.x + (area.width - search_width) / 2;
         let search_area = Rect::new(search_x, area.y + area.height - 3, search_width, 3);
 
+        frame.render_widget(Clear, search_area);
+
         let search_bar = Paragraph::new(format!("/{}", log_state.search_query))
             .style(Style::new().bg(Color::DarkGray).fg(Color::White))
             .block(
